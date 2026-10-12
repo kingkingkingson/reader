@@ -72,9 +72,17 @@ export function TrashView({ documents }: { documents: Document[] }) {
         </p>
       )}
       <ul className="trash-list">
-        {documents.map((d) => (
-          <li key={d.id} className="trash-row">
-            {d.type === "epub" ? <BookOpen /> : <FileText />}
+        {documents.map((d, index) => (
+          <li
+            key={d.id}
+            className="trash-row"
+            data-band={index % 2 === 0 ? "shallow" : "deep"}
+          >
+            {d.type === "epub" ? (
+              <BookOpen data-type="epub" />
+            ) : (
+              <FileText data-type="pdf" />
+            )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm" title={d.title}>
                 {d.title}

@@ -16,6 +16,7 @@ import {
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { api } from "@reader/api";
 import { ErrorBoundary } from "../ErrorBoundary";
 import remend from "remend";
 import { marked } from "marked";
@@ -33,6 +34,44 @@ export const safeMarkdownURL = (url: string) =>
   /^(https?:\/\/|mailto:|#)/i.test(url)
     ? url.replace(/(?:[。，；！？]|%E3%80%82|%EF%BC%8C)+$/gi, "")
     : "";
+const noteImageReference = (url?: string) =>
+  url?.match(/^note-image:([0-9a-f]{32}\.(?:png|jpe?g|gif|webp))$/)?.[1] ?? "";
+function NoteImage({
+  documentId,
+  src,
+  alt,
+}: {
+  documentId: string;
+  src?: string;
+  alt?: string;
+}) {
+  const name = noteImageReference(src);
+  const [url, setUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!name) return;
+    let alive = true;
+    let objectURL = "";
+    api
+      .noteImage(documentId, name)
+      .then((blob) => {
+        if (!alive) return;
+        objectURL = URL.createObjectURL(blob);
+        setUrl(objectURL);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+      if (objectURL) URL.revokeObjectURL(objectURL);
+    };
+  }, [documentId, name]);
+  if (!name || failed)
+    return <span className="markdown-image">[图片：{alt || "未加载"}]</span>;
+  if (!url) return <span className="markdown-image">图片加载中…</span>;
+  return <img className="note-image" src={url} alt={alt || ""} />;
+}
 function MarkdownLink({
   href,
   children,
@@ -176,9 +215,13 @@ const markdownOptions = {
 const StaticBlock = memo(function StaticBlock({
   text,
   citationBlockId,
+  images,
+  documentId,
 }: {
   text: string;
   citationBlockId?: string;
+  images?: boolean;
+  documentId?: string;
 }) {
   const options = useMemo<
     Pick<ComponentProps<typeof CachedMarkdown>, "remarkPlugins">
@@ -191,8 +234,21 @@ const StaticBlock = memo(function StaticBlock({
     }),
     [citationBlockId],
   );
+  const imageOptions =
+    images && documentId
+      ? {
+          components: {
+            ...components,
+            img: ({ src, alt }: { src?: string; alt?: string }) => (
+              <NoteImage documentId={documentId} src={src} alt={alt} />
+            ),
+          },
+          urlTransform: (url: string) =>
+            noteImageReference(url) ? url : safeMarkdownURL(url),
+        }
+      : {};
   return (
-    <CachedMarkdown {...markdownOptions} {...options}>
+    <CachedMarkdown {...markdownOptions} {...options} {...imageOptions}>
       {text}
     </CachedMarkdown>
   );
@@ -202,11 +258,15 @@ function StaticMarkdown({
   generating,
   global,
   citationBlockId,
+  images,
+  documentId,
 }: {
   content: string;
   generating: boolean;
   global: boolean;
   citationBlockId?: string;
+  images?: boolean;
+  documentId?: string;
 }) {
   const blocks = useMemo(() => {
     const text = generating ? remend(content) : content;
@@ -232,6 +292,8 @@ function StaticMarkdown({
           key={index}
           text={text}
           citationBlockId={citationBlockId}
+          images={images}
+          documentId={documentId}
         />
       ))}
     </>
@@ -243,12 +305,16 @@ export const MessageMarkdown = memo(function MessageMarkdown({
   reducedMotion = false,
   animated = true,
   citationBlockId,
+  images = false,
+  documentId,
 }: {
   content: string;
   generating?: boolean;
   reducedMotion?: boolean;
   animated?: boolean;
   citationBlockId?: string;
+  images?: boolean;
+  documentId?: string;
 }) {
   const reduced = useMotionPreference();
   const [backgrounded, setBackgrounded] = useState(false);
@@ -266,6 +332,7 @@ export const MessageMarkdown = memo(function MessageMarkdown({
     /^ {0,3}\[(?:\^)?[^\]]+\]:/m.test(content) ||
     /\[[^\]]+\]\[[^\]]*\]|\[\^/.test(content);
   const animate =
+    !images &&
     generating &&
     animated &&
     !reducedMotion &&
@@ -293,6 +360,8 @@ export const MessageMarkdown = memo(function MessageMarkdown({
             generating={generating}
             global={globalDefinitions}
             citationBlockId={citationBlockId}
+            images={images}
+            documentId={documentId}
           />
         )}
       </ErrorBoundary>

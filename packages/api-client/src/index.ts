@@ -80,6 +80,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
+async function blobRequest(path: string): Promise<Blob> {
+  const response = await fetch(path, {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new RequestError(data.error || `请求失败 (${response.status})`);
+  }
+  return response.blob();
+}
 // Keep annotation writes and undo in the same client order, including failures.
 let annotationQueue = Promise.resolve();
 let annotationSession = "";
@@ -389,6 +399,28 @@ export const api = {
     request<{ body: string; updatedAt?: string }>(
       `/api/documents/${encodeURIComponent(id)}/note`,
       { method: "PUT", body: JSON.stringify({ body }) },
+    ),
+  saveNoteImage: async (id: string, file: Blob) => {
+    const response = await fetch(
+      `/api/documents/${encodeURIComponent(id)}/note-images`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+      },
+    );
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new RequestError(data.error || `请求失败 (${response.status})`);
+    }
+    return response.json() as Promise<{ id: string }>;
+  },
+  noteImage: (id: string, name: string) =>
+    blobRequest(
+      `/api/documents/${encodeURIComponent(id)}/note-images/${encodeURIComponent(name)}`,
     ),
   undoAnnotation: (id: string) =>
     annotationRequest<{ undone: boolean; annotations: Annotation[] }>(

@@ -172,6 +172,7 @@ export function LibraryDocuments({
             <ContextMenuTrigger
               render={<article />}
               className="book-card"
+              data-band={i % 2 === 0 ? "shallow" : "deep"}
               data-selected={selecting && selected.has(doc.id)}
               tabIndex={0}
               aria-label={doc.title}

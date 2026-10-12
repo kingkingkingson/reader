@@ -287,6 +287,48 @@ it("shows passive feedback during positioning, fades it on completion and keeps 
   vi.unstubAllGlobals();
 });
 
+it("keeps a double click on paragraph text from changing the layout", () => {
+  vi.useFakeTimers();
+  const host = document.createElement("div");
+  host.innerHTML =
+    '<div class="page" data-page-number="2"><div class="textLayer"><span>Text</span></div></div>';
+  const page = host.firstElementChild as HTMLElement;
+  page.getBoundingClientRect = () => new DOMRect(10, 20, 1000, 1400);
+  const focus = vi.fn(() => true);
+  const layer = new PDFBlockOverlay(host, vi.fn(), vi.fn(), focus);
+  const text = { ...block, image: undefined, label: "text", text: "Paragraph" };
+  layer.setBlocks([text]);
+  const target = page.querySelector("span")!;
+  const click = (detail: number) => {
+    target.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        clientX: 210,
+        clientY: 440,
+      }),
+    );
+    target.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        detail,
+        clientX: 210,
+        clientY: 440,
+      }),
+    );
+  };
+  click(1);
+  click(2);
+  vi.advanceTimersByTime(400);
+  expect(focus).not.toHaveBeenCalled();
+  click(1);
+  vi.advanceTimersByTime(399);
+  expect(focus).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(focus).toHaveBeenCalledTimes(1);
+  layer.destroy();
+  vi.useRealTimers();
+});
+
 it("focuses text and image clicks without attaching images, and leaves drags and links alone", async () => {
   const host = document.createElement("div");
   host.innerHTML =

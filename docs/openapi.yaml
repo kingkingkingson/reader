@@ -3227,6 +3227,112 @@
                 },
             },
         },
+      "/api/documents/{id}/note-images":
+        {
+          "post":
+            {
+              "operationId": "saveNoteImage",
+              "summary": "Store one pasted note image",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/octet-stream":
+                        { "schema": { "type": "string", "format": "binary" } },
+                    },
+                },
+              "responses":
+                {
+                  "201":
+                    {
+                      "description": "Stored",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "properties": { "id": { "type": "string" } },
+                                  "required": ["id"],
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/note-images/{name}":
+        {
+          "get":
+            {
+              "operationId": "noteImage",
+              "summary": "Read one note image",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "name",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Image bytes",
+                      "content":
+                        {
+                          "image/*":
+                            {
+                              "schema": { "type": "string", "format": "binary" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
     },
   "components":
     {

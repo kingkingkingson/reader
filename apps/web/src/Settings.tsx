@@ -16,6 +16,7 @@ import {
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
 import { APIAgentForm, APIModelForm } from "./APIAgentForm";
+import { libraryChrome } from "./appearance";
 import { api } from "@reader/api";
 import type {
   AICapability,
@@ -60,9 +61,45 @@ import {
 } from "./store";
 import { libraryModes } from "./LibraryModeSwitcher";
 import { Checkbox } from "@reader/ui/components/checkbox";
+import { Textarea } from "@reader/ui/components/textarea";
 import { toast } from "sonner";
 // Checks run automatically for this many API models; the rest on demand.
 const autoAPIChecks = 12;
+const translationGlossaryLimit = 4000;
+
+function TranslationGlossaryField({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const saved = useRef(value);
+  useEffect(() => {
+    saved.current = value;
+    setDraft(value);
+  }, [value]);
+  const commit = (next: string) => {
+    const text = next.trim();
+    if (text === saved.current.trim()) return;
+    saved.current = text;
+    onSave(text);
+  };
+  return (
+    <Textarea
+      aria-label="翻译术语"
+      value={draft}
+      maxLength={translationGlossaryLimit}
+      rows={6}
+      placeholder={
+        "例如：\nagent 在本文中指智能体，不要译成代理。\nfuzzing 译为模糊测试。"
+      }
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={(event) => commit(event.target.value)}
+    />
+  );
+}
 export function Settings({
   open,
   onOpenChange,
@@ -552,10 +589,38 @@ export function Settings({
                 下次启动时默认进入此模式。
               </p>
             </section>
+            <section className="mb-6">
+              <h3 className="mb-3 text-sm font-medium">界面风格</h3>
+              <div className="flex gap-2">
+                {(
+                  [
+                    ["zotero", "zotero"],
+                    ["plain", "简洁"],
+                  ] as const
+                ).map(([chrome, label]) => (
+                  <Button
+                    key={chrome}
+                    aria-pressed={libraryChrome(theme) === chrome}
+                    variant={
+                      libraryChrome(theme) === chrome ? "default" : "outline"
+                    }
+                    onClick={() => setTheme({ chrome })}
+                  >
+                    {label}
+                    {libraryChrome(theme) === chrome && (
+                      <Check className="size-3" />
+                    )}
+                  </Button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                zotero 风格按类型给图标上色，并用深浅交替的横条区分列表条目。
+              </p>
+            </section>
             <section>
               <h3 className="mb-3 text-sm font-medium">界面主题</h3>
-              <div className="flex gap-2">
-                {(["light", "sepia", "dark", "system"] as const).map(
+              <div className="flex flex-wrap gap-2">
+                {(["light", "sepia", "cream", "dark", "system"] as const).map(
                   (mode, i) => (
                     <Button
                       key={mode}
@@ -569,13 +634,15 @@ export function Settings({
                         setTheme({
                           appearance: mode,
                           mode:
-                            mode === "dark" || mode === "sepia"
+                            mode === "dark" ||
+                            mode === "sepia" ||
+                            mode === "cream"
                               ? mode
                               : "light",
                         })
                       }
                     >
-                      {["浅色", "纸张", "深色", "跟随系统"][i]}
+                      {["浅色", "纸张", "米黄", "深色", "跟随系统"][i]}
                       {(theme.appearance ?? "system") === mode && (
                         <Check className="size-3" />
                       )}
@@ -601,6 +668,18 @@ export function Settings({
                   </span>
                 </span>
               </label>
+            </section>
+            <section className="mb-6">
+              <h3 className="mb-1 text-sm font-medium">翻译术语</h3>
+              <p className="mb-2 text-xs text-muted-foreground">
+                翻译时把这段说明交给模型，规定专门术语怎么理解、译成什么。已翻译的段落不会自动重译。
+              </p>
+              <TranslationGlossaryField
+                value={theme.translationGlossary ?? ""}
+                onSave={(translationGlossary) =>
+                  setTheme({ translationGlossary })
+                }
+              />
             </section>
             <section>
               <h3 className="mb-3 text-sm font-medium">高亮颜色</h3>

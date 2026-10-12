@@ -116,6 +116,16 @@ it.each(["+", "="])(
     expect(zoom).toHaveBeenLastCalledWith(state.scale);
   },
 );
+it("zooms from the page controls and fits the width again", () => {
+  adapter.adjustZoom("in");
+  expect(state.scale).toBeGreaterThan(1);
+  expect(zoom).toHaveBeenLastCalledWith(state.scale);
+  adapter.adjustZoom("out");
+  expect(state.scale).toBeLessThanOrEqual(1);
+  adapter.adjustZoom("width");
+  expect(state.scaleValue).toBe("page-width");
+  expect(zoom).toHaveBeenLastCalledWith("width");
+});
 it("supports zoom out, Ctrl shortcuts and reset to fit width", () => {
   expect(
     key("-", document, { metaKey: false, ctrlKey: true }).defaultPrevented,

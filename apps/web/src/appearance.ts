@@ -1,5 +1,9 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { defaultTheme, type ReaderTheme } from "@reader/core";
+import {
+  defaultTheme,
+  type LibraryChrome,
+  type ReaderTheme,
+} from "@reader/core";
 const query = "(prefers-color-scheme: dark)";
 function subscribe(callback: () => void) {
   const media = window.matchMedia(query);
@@ -16,14 +20,21 @@ export function resolveTheme(
       ? systemDark
         ? "dark"
         : "light"
-      : appearance === "dark"
-        ? "dark"
+      : appearance === "dark" ||
+          appearance === "sepia" ||
+          appearance === "cream"
+        ? appearance
         : // Older settings kept paper as light appearance plus a sepia mode.
-          appearance === "sepia" || theme.mode === "sepia"
-          ? "sepia"
+          theme.mode === "sepia" || theme.mode === "cream"
+          ? theme.mode
           : "light";
   return { ...theme, mode };
 }
+/** Colored zotero chrome unless the reader explicitly chose the flat style. */
+export function libraryChrome(theme: ReaderTheme): LibraryChrome {
+  return theme.chrome === "plain" ? "plain" : "zotero";
+}
+
 export function useResolvedTheme(theme: ReaderTheme) {
   const dark = useSyncExternalStore(
     subscribe,

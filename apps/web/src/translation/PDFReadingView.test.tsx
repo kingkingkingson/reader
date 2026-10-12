@@ -64,6 +64,7 @@ const adapter = {
   getContext: vi.fn(async () => ""),
   destroy: vi.fn(async () => {}),
   focusBlock: vi.fn(async () => {}),
+  adjustZoom: vi.fn(),
   cancelBlockFocus: vi.fn(),
   followBlock: vi.fn(async () => {}),
   focusSentences: vi.fn(async () => {}),
@@ -293,16 +294,18 @@ it("focuses the visible middle translation once when entering parallel mode", as
   });
   expect(adapter.followBlock).not.toHaveBeenCalled();
   await click("原文译文");
-  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
-    "p1-b1",
-    "parallel",
-  );
-  expect(adapter.followBlock).not.toHaveBeenCalled();
+  expect(adapter.adjustZoom).toHaveBeenCalledWith("width");
+  expect(adapter.focusBlock).not.toHaveBeenCalled();
+  expect(adapter.followBlock).toHaveBeenCalledExactlyOnceWith({
+    blockId: "p1-b1",
+    fraction: 0.5,
+  });
   await renderView({ ...defaultTheme, translationFontSize: 1.2 });
-  expect(adapter.focusBlock).toHaveBeenCalledTimes(1);
+  expect(adapter.focusBlock).not.toHaveBeenCalled();
   await click("仅译文");
   await click("原文译文");
-  expect(adapter.focusBlock).toHaveBeenCalledTimes(2);
+  expect(adapter.followBlock).toHaveBeenCalledTimes(2);
+  expect(adapter.focusBlock).not.toHaveBeenCalled();
 });
 
 it("chooses the source viewport's middle block before resizing, even with a stale reading anchor", async () => {
@@ -329,16 +332,19 @@ it("chooses the source viewport's middle block before resizing, even with a stal
   source.append(page);
   host.querySelector(".translation-source")!.append(source);
   await click("原文译文");
-  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
-    "p1-b2",
-    "parallel",
-  );
+  expect(adapter.focusBlock).not.toHaveBeenCalled();
+  expect(adapter.followBlock).toHaveBeenCalledExactlyOnceWith({
+    blockId: "p1-b2",
+    fraction: 0.5,
+  });
   await click("交换原文和译文");
-  expect(adapter.focusBlock).toHaveBeenCalledTimes(1);
+  expect(adapter.followBlock).toHaveBeenCalledTimes(1);
   await click("仅原文");
   await click("原文译文");
-  expect(adapter.focusBlock).toHaveBeenCalledTimes(2);
-  expect(adapter.focusBlock).toHaveBeenLastCalledWith("p1-b2", "parallel");
+  expect(adapter.followBlock).toHaveBeenLastCalledWith({
+    blockId: "p1-b2",
+    fraction: 0.5,
+  });
 });
 
 it("navigates to the matching bibliography block and restores the translated viewport fraction", async () => {
@@ -814,9 +820,13 @@ it.each([false, true])(
       await act(async () => {
         await vi.advanceTimersByTimeAsync(600);
       });
-      expect(adapter.focusBlock).toHaveBeenCalledWith("p1-b2", "parallel");
+      expect(adapter.adjustZoom).toHaveBeenCalledWith("width");
+      expect(adapter.focusBlock).not.toHaveBeenCalled();
+      expect(adapter.followBlock).toHaveBeenCalledWith({
+        blockId: "p1-b2",
+        fraction: 0.5,
+      });
       expect(top).toBe(800);
-      expect(adapter.followBlock).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
       for (const spy of [rect, height, width, scrollHeight, scroll, setScroll])

@@ -78,6 +78,7 @@ export class PDFBlockOverlay {
   private linked = document.createElement("div");
   private searchBlocks = new Map<string, HTMLDivElement>();
   private pressed?: { id: string; x: number; y: number };
+  private textFocusTimer?: ReturnType<typeof setTimeout>;
   constructor(
     private host: HTMLElement,
     private onAction: (
@@ -169,7 +170,10 @@ export class PDFBlockOverlay {
     if (element.parentElement !== page) page.append(element);
   }
   private leave = () => this.dismiss(false);
-  clear = () => this.dismiss(true);
+  clear = () => {
+    this.cancelTextFocus();
+    this.dismiss(true);
+  };
   private dismiss(immediate: boolean) {
     this.pressed = undefined;
     this.hide(this.overlay, immediate);
@@ -192,6 +196,12 @@ export class PDFBlockOverlay {
   };
   private click = (event: MouseEvent) => {
     if ((event.target as Element)?.closest("[data-block-action]")) return;
+    // The first click of a double click must not zoom the paragraph.
+    if (event.detail > 1) {
+      this.cancelTextFocus();
+      this.pressed = undefined;
+      return;
+    }
     const pressed = this.pressed;
     this.pressed = undefined;
     if (
@@ -204,17 +214,33 @@ export class PDFBlockOverlay {
     if (!block || block.id !== pressed.id) return;
     if ((event.target as Element)?.closest("a, button, input, [role=button]"))
       return;
+    if ((event.target as Element | null)?.closest(".textLayer")) {
+      this.cancelTextFocus();
+      this.textFocusTimer = setTimeout(() => {
+        this.textFocusTimer = undefined;
+        if (window.getSelection()?.toString().trim()) return;
+        this.commitFocus(block);
+      }, 400);
+      return;
+    }
+    this.commitFocus(block, event);
+  };
+  private cancelTextFocus() {
+    clearTimeout(this.textFocusTimer);
+    this.textFocusTimer = undefined;
+  }
+  private commitFocus(block: PDFBlock, event?: MouseEvent) {
     if (this.onFocus(block)) {
-      event.preventDefault();
-      event.stopPropagation();
+      event?.preventDefault();
+      event?.stopPropagation();
       this.clear();
       return;
     }
     if (!block.image) return;
-    event.preventDefault();
-    event.stopPropagation();
+    event?.preventDefault();
+    event?.stopPropagation();
     this.onAction(block, "attach");
-  };
+  }
   private find(event: MouseEvent) {
     const page = (event.target as Element | null)?.closest<HTMLElement>(
       ".page[data-page-number]",
@@ -389,6 +415,7 @@ export class PDFBlockOverlay {
     this.show(this.linked, page);
   }
   destroy() {
+    this.cancelTextFocus();
     clearTimeout(this.referenceFlashTimer);
     this.referenceFlash.remove();
     for (const element of this.searchBlocks.values()) element.remove();

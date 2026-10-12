@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { defaultTheme, type ReaderTheme } from "@reader/core";
 import {
+  libraryChrome,
   resolveTheme,
   stepTranslationSize,
   useResolvedTheme,
@@ -28,6 +29,14 @@ it("resolves explicit appearance independently from OS and preserves paper mode"
   expect(
     resolveTheme({ ...defaultTheme, appearance: "sepia" }, true).mode,
   ).toBe("sepia");
+  expect(
+    resolveTheme({ ...defaultTheme, appearance: "cream" }, false).mode,
+  ).toBe("cream");
+});
+it("uses the zotero chrome unless plain is chosen", () => {
+  expect(libraryChrome(defaultTheme)).toBe("zotero");
+  expect(libraryChrome({ ...defaultTheme, chrome: "zotero" })).toBe("zotero");
+  expect(libraryChrome({ ...defaultTheme, chrome: "plain" })).toBe("plain");
 });
 it("steps translated text size within bounds", () => {
   expect(stepTranslationSize(1, 1)).toBe(1.05);

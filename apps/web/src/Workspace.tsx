@@ -18,6 +18,9 @@ import {
   ListTree,
   Search,
   BookmarkPlus,
+  UnfoldHorizontal,
+  ZoomIn,
+  ZoomOut,
   Sparkles,
   Settings2,
   Underline,
@@ -54,7 +57,6 @@ import {
   readerLink,
 } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
-import { Badge } from "@reader/ui/components/badge";
 import { Input } from "@reader/ui/components/input";
 import { Textarea } from "@reader/ui/components/textarea";
 import {
@@ -122,12 +124,14 @@ function IconButton({
   onClick,
   active = false,
   expanded,
+  disabled = false,
 }: {
   label: string;
   children: React.ReactNode;
   onClick: () => void;
   active?: boolean;
   expanded?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Tooltip>
@@ -138,6 +142,7 @@ function IconButton({
             aria-expanded={expanded}
             size="icon-sm"
             variant={active ? "secondary" : "ghost"}
+            disabled={disabled}
             onClick={onClick}
           />
         }
@@ -205,13 +210,11 @@ export function Workspace({
   document: doc,
   theme,
   processing,
-  onBack,
   onSettings,
 }: {
   document: ReaderDocument;
   theme: ReaderTheme;
   processing?: Processing;
-  onBack: () => void;
   onSettings: () => void;
 }) {
   const { setTheme, aiConfig, setAIConfig, aiModelSaving } = useReaderStore();
@@ -889,16 +892,6 @@ export function Workspace({
       <header className="reader-toolbar">
         <div className="reader-title-group">
           <IconButton
-            label="返回书库"
-            onClick={() => {
-              void flushProgress()
-                .then(onBack)
-                .catch((e) => toast.error(e.message));
-            }}
-          >
-            <ArrowLeft />
-          </IconButton>
-          <IconButton
             label="目录与搜索"
             active={left}
             expanded={left}
@@ -906,11 +899,6 @@ export function Workspace({
           >
             <PanelLeft />
           </IconButton>
-          <span className="toolbar-divider" />
-          <span className="reader-title" title={doc.title}>
-            {doc.title}
-          </span>
-          <Badge variant="secondary">{doc.type.toUpperCase()}</Badge>
         </div>
         <div className="toolbar-actions">
           {returnLocation && (
@@ -926,6 +914,42 @@ export function Workspace({
           )}
           <div ref={setReadingToolbar} />
           <span className="toolbar-divider" />
+          {doc.type === "pdf" && (
+            <div
+              className="pdf-zoom-controls"
+              role="group"
+              aria-label="页面缩放"
+            >
+              <IconButton
+                label="缩小"
+                disabled={
+                  !adapter ||
+                  (typeof theme.zoom === "number" && theme.zoom <= 0.25)
+                }
+                onClick={() => adapter?.adjustZoom?.("out")}
+              >
+                <ZoomOut />
+              </IconButton>
+              <IconButton
+                label="放大"
+                disabled={
+                  !adapter ||
+                  (typeof theme.zoom === "number" && theme.zoom >= 5)
+                }
+                onClick={() => adapter?.adjustZoom?.("in")}
+              >
+                <ZoomIn />
+              </IconButton>
+              <IconButton
+                label="适合宽度"
+                active={theme.zoom === "width"}
+                disabled={!adapter}
+                onClick={() => adapter?.adjustZoom?.("width")}
+              >
+                <UnfoldHorizontal />
+              </IconButton>
+            </div>
+          )}
           <IconButton
             label="添加书签"
             onClick={() => void annotate("bookmark")}
@@ -943,17 +967,19 @@ export function Workspace({
             <PopoverContent className="w-72">
               <h3 className="mb-4 text-sm font-medium">阅读外观</h3>
               <div className="space-y-4">
-                <div className="flex gap-2">
-                  {(["light", "sepia", "dark"] as const).map((mode, i) => (
-                    <Button
-                      key={mode}
-                      size="sm"
-                      variant={theme.mode === mode ? "default" : "outline"}
-                      onClick={() => setTheme({ mode, appearance: mode })}
-                    >
-                      {["浅色", "纸张", "深色"][i]}
-                    </Button>
-                  ))}
+                <div className="flex flex-wrap gap-2">
+                  {(["light", "sepia", "cream", "dark"] as const).map(
+                    (mode, i) => (
+                      <Button
+                        key={mode}
+                        size="sm"
+                        variant={theme.mode === mode ? "default" : "outline"}
+                        onClick={() => setTheme({ mode, appearance: mode })}
+                      >
+                        {["浅色", "纸张", "米黄", "深色"][i]}
+                      </Button>
+                    ),
+                  )}
                 </div>
                 {doc.type === "epub" ? (
                   <>

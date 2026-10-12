@@ -21,10 +21,11 @@ import {
   type Document,
   type Message,
 } from "@reader/core";
-import { api } from "@reader/api";
 import { Badge } from "@reader/ui/components/badge";
 import { Button } from "@reader/ui/components/button";
 import { Input } from "@reader/ui/components/input";
+import { api } from "@reader/api";
+import { toast } from "sonner";
 import { Textarea } from "@reader/ui/components/textarea";
 import { ScrollArea } from "@reader/ui/components/scroll-area";
 import {
@@ -37,12 +38,16 @@ import {
   ToggleGroupItem,
 } from "@reader/ui/components/toggle-group";
 import { Tabs, TabsList, TabsTrigger } from "@reader/ui/components/tabs";
-import { toast } from "sonner";
 import { annotationLabels } from "./AnnotationToolbar";
 import { copyText } from "./chat/clipboard";
 import { colorLabel, documentOrder, highlightPalette } from "./annotations";
 import { useReaderStore } from "./store";
 import { annotationDigest } from "./notes-export";
+import {
+  pastedNoteImages,
+  placeNoteImages,
+  useDocumentNote,
+} from "./document-note";
 
 export { documentOrder };
 
@@ -102,59 +107,20 @@ function PaperNote({
   documentId: string;
   annotations: Annotation[];
 }) {
-  const [body, setBody] = useState("");
-  const [state, setState] = useState<"loading" | "idle" | "saving" | "saved">(
-    "loading",
-  );
-  const [open, setOpen] = useState(true);
-  const saved = useRef("");
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const note = useDocumentNote(documentId);
+  const [open, setOpen] = useState(false);
+  const prepared = useRef("");
   useEffect(() => {
-    let alive = true;
-    void api
-      .documentNote(documentId)
-      .then((note) => {
-        if (!alive) return;
-        saved.current = note.body;
-        setBody(note.body);
-        setOpen(!!note.body);
-        setState("idle");
-      })
-      .catch((e) => toast.error((e as Error).message));
-    return () => {
-      alive = false;
-    };
-  }, [documentId]);
-  const save = async (text: string) => {
-    clearTimeout(timer.current);
-    if (text === saved.current) return;
-    setState("saving");
-    try {
-      await api.saveDocumentNote(documentId, text);
-      saved.current = text;
-      setState("saved");
-    } catch (e) {
-      setState("idle");
-      toast.error((e as Error).message);
-    }
-  };
+    if (note.status === "loading" || prepared.current === documentId) return;
+    prepared.current = documentId;
+    setOpen(!!note.body);
+  }, [documentId, note.body, note.status]);
   const digest =
-    state === "loading"
+    note.status === "loading"
       ? ""
-      : annotationDigest(annotations, body, (a) =>
+      : annotationDigest(annotations, note.body, (a) =>
           readerLink({ id: documentId, annotation: a.id }),
         );
-  // Save on unmount so switching documents never drops the last edit.
-  const latest = useRef(body);
-  latest.current = body;
-  useEffect(
-    () => () => {
-      clearTimeout(timer.current);
-      if (latest.current !== saved.current)
-        void api.saveDocumentNote(documentId, latest.current).catch(() => {});
-    },
-    [documentId],
-  );
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="paper-note">
       <CollapsibleTrigger
@@ -165,36 +131,63 @@ function PaperNote({
         <ChevronDown data-open={open} />
         论文笔记
         <span className="ml-auto text-[10px] text-muted-foreground">
-          {state === "saving" ? "保存中…" : state === "saved" ? "已保存" : ""}
+          {note.status === "saving"
+            ? "保存中…"
+            : note.status === "saved"
+              ? "已保存"
+              : ""}
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <Textarea
           aria-label="论文笔记"
           placeholder="记下整篇的要点、疑问和启发…"
-          disabled={state === "loading"}
-          value={body}
-          onChange={(e) => {
-            const text = e.target.value;
-            setBody(text);
-            clearTimeout(timer.current);
-            timer.current = setTimeout(() => void save(text), 800);
+          disabled={note.status === "loading"}
+          value={note.body}
+          onChange={(e) => note.setBody(e.target.value)}
+          onPaste={(event) => {
+            const files = pastedNoteImages(event.clipboardData);
+            if (!files.length) return;
+            event.preventDefault();
+            const field = event.currentTarget;
+            const start = field.selectionStart ?? note.body.length;
+            const end = field.selectionEnd ?? start;
+            const base = note.body;
+            void (async () => {
+              try {
+                const saved = [];
+                for (const file of files)
+                  saved.push(await api.saveNoteImage(documentId, file));
+                note.setBody(
+                  placeNoteImages(
+                    base,
+                    start,
+                    end,
+                    saved.map((item) => item.id),
+                  ).text,
+                  true,
+                );
+              } catch (error) {
+                toast.error(
+                  error instanceof Error ? error.message : "图片未能放入",
+                );
+              }
+            })();
           }}
-          onBlur={() => void save(body)}
+          onBlur={() => note.flush()}
           className="paper-note-input"
         />
         <Button
           size="xs"
           variant="ghost"
           className="mt-1 text-muted-foreground"
-          disabled={state === "loading" || !digest}
+          disabled={note.status === "loading" || !digest}
           title={digest ? undefined : "所有批注都已摘录"}
           onClick={() => {
-            const text = body.trimEnd()
-              ? `${body.trimEnd()}\n\n${digest}\n`
+            const text = note.body.trimEnd()
+              ? `${note.body.trimEnd()}\n\n${digest}\n`
               : `${digest}\n`;
-            setBody(text);
-            void save(text);
+            note.setBody(text, true);
           }}
         >
           <ListPlus />

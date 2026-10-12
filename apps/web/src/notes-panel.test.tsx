@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "@reader/api";
 import type { Annotation, Message } from "@reader/core";
 import { NotesPanel, documentOrder } from "./NotesPanel";
+import { clearDocumentNotes } from "./document-note";
 import { paper } from "./papers/fixtures";
 vi.mock("@reader/api", () => ({
   api: {
@@ -82,6 +83,7 @@ const handlers = {
   onExport: vi.fn(),
 };
 beforeEach(async () => {
+  clearDocumentNotes();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.clearAllMocks();

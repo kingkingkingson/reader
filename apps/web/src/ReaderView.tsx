@@ -86,10 +86,15 @@ export function ReaderView({
           if (!disposed) latest.current.events.internalLink?.(origin);
         },
       });
-      engine.preferTheme?.(latest.current.theme);
+      const openingTheme =
+        doc.type === "pdf"
+          ? { ...latest.current.theme, zoom: "width" as const }
+          : latest.current.theme;
+      engine.preferTheme?.(openingTheme);
       await engine.open(doc);
       if (disposed) return;
-      await engine.setTheme(latest.current.theme);
+      await engine.setTheme(openingTheme);
+      if (doc.type === "pdf") latest.current.events.zoom?.("width");
       await engine.highlight(latest.current.annotations).catch((e) => {
         if (!disposed) toast.error(e.message);
       });

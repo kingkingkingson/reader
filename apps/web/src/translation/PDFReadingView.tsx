@@ -51,6 +51,7 @@ import { numberedReference } from "../readers/pdf-citations";
 import "./translation.css";
 
 import { AssistanceControls } from "./AssistanceControls";
+import { DocumentNotePage } from "../DocumentNotePage";
 import { chapterRange } from "./chapters";
 import { searchPDFBlocks } from "./pdf-search";
 
@@ -82,6 +83,7 @@ export function PDFReadingView({
 }) {
   const [mode, setMode] = useState<Mode>("source"),
     [swapped, setSwapped] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
   const { translations, error } = useTranslations(doc.id);
   const [popup, setPopup] = useState<{ block: PDFBlock; rect: DOMRect }>(),
     [linked, setLinked] = useState<Record<string, number[]>>();
@@ -555,33 +557,48 @@ export function PDFReadingView({
     window.getSelection()?.removeAllRanges();
     setLinked(undefined);
     void engine.focusSentences?.("", []);
-    if (previous !== mode && mode === "parallel") {
-      const block = blocks.find(
-        (b) => b.id === (enteringParallel.current ?? reading.current?.blockId),
-      );
+    if (previous !== mode && mode !== "translation") {
+      const block =
+        mode === "parallel"
+          ? blocks.find(
+              (b) =>
+                b.id === (enteringParallel.current ?? reading.current?.blockId),
+            )
+          : undefined;
       enteringParallel.current = undefined;
-      if (block) {
-        // Panel resize commits and ResizeObserver callbacks can follow this effect.
-        // Keep the selected block fixed until both panes have their new geometry.
-        const motion = explicitFocus.current;
-        const operation = motion.operation;
-        motion.moving = true;
-        let frame = requestAnimationFrame(() => {
-          frame = requestAnimationFrame(() => {
-            if (cancelled || operation !== motion.operation) return;
-            focusBlock(
-              block,
-              previous === "translation" ? "translation" : "source",
-            );
+      // The split pane reaches its new width after this effect. Fit that width
+      // before scrolling, and leave later resizes on page-width.
+      const motion = explicitFocus.current;
+      const operation = motion.operation;
+      motion.moving = true;
+      let frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          if (cancelled || operation !== motion.operation) return;
+          engine.adjustZoom?.("width");
+          if (!block) {
+            motion.moving = false;
+            if (reading.current) void engine.followBlock?.(reading.current);
+            return;
+          }
+          const anchor = { blockId: block.id, fraction: 0.5 };
+          recordReading(anchor);
+          void Promise.all([
+            engine.followBlock?.(anchor),
+            followTranslation(anchor, undefined, {
+              smooth: true,
+              center: true,
+            }),
+          ]).finally(() => {
+            if (operation === motion.operation) motion.moving = false;
           });
         });
-        return () => {
-          cancelled = true;
-          cancelAnimationFrame(frame);
-          if (operation === motion.operation) motion.moving = false;
-          engine.hoverBlock?.(null);
-        };
-      }
+      });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(frame);
+        if (operation === motion.operation) motion.moving = false;
+        engine.hoverBlock?.(null);
+      };
     }
     const restore = async () => {
       if (previous !== mode && mode !== "translation" && reading.current)
@@ -830,11 +847,28 @@ export function PDFReadingView({
           );
         }}
       />
-      <Tabs value={mode} onValueChange={(v) => changeMode(v as Mode)}>
+      <Tabs
+        value={noteOpen ? "note" : mode}
+        onValueChange={(value) => {
+          if (value === "note") {
+            setNoteOpen(true);
+            return;
+          }
+          if (
+            value !== "source" &&
+            value !== "parallel" &&
+            value !== "translation"
+          )
+            return;
+          setNoteOpen(false);
+          if (value !== mode) changeMode(value);
+        }}
+      >
         <TabsList>
           <TabsTrigger value="source">仅原文</TabsTrigger>
           <TabsTrigger value="parallel">原文译文</TabsTrigger>
           <TabsTrigger value="translation">仅译文</TabsTrigger>
+          <TabsTrigger value="note">笔记</TabsTrigger>
         </TabsList>
       </Tabs>
     </div>
@@ -842,310 +876,313 @@ export function PDFReadingView({
   return (
     <div className="pdf-reading" ref={root} data-theme={theme.mode}>
       {toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar}
-      {mode === "translation" && (
-        <div className="pdf-reading-controls">
-          <div className="pdf-page-navigation">{pageNavigation}</div>
-        </div>
-      )}
-      <TranslationPanes
-        mode={mode}
-        swapped={swapped}
-        onSwap={() => setSwapped((value) => !value)}
-        source={
-          <div
-            className="translation-source"
-            inert={mode === "translation"}
-            onWheelCapture={() => input("source")}
-            onPointerDownCapture={() => input("source")}
-            onKeyDownCapture={() => input("source")}
-          >
-            <ReaderView
-              document={doc}
-              theme={theme}
-              annotations={annotations.filter(
-                (a) => a.location.type !== "pdf" || !a.location.translation,
-              )}
-              blocks={blocks}
-              onReady={ready}
-              events={{
-                ...events,
-                selection: sourceSelection,
-                blockFocus: (block) => focusBlock(block, "source"),
-                location: (location, percentage) => {
-                  if (
-                    state.current.mode !== "translation" &&
-                    side.current === "source"
-                  )
-                    events.location(location, percentage);
-                },
-                readingAnchor: (anchor) => {
-                  if (
-                    explicitFocus.current.moving ||
-                    !control.current.canFollow("source") ||
-                    selecting.current
-                  )
-                    return;
-                  recordReading(anchor);
-                  if (state.current.mode === "parallel")
-                    followTranslation(anchor);
-                },
-                blockHover: (block) => {
-                  if (mode === "parallel") hover("source", block?.id);
-                },
-                blockAction: (block, action) => {
-                  if (action !== "translate") {
-                    events.blockAction?.(block, action);
-                    return;
-                  }
-                  const button = root.current?.querySelector<HTMLElement>(
-                    `[data-block-id="${block.id}"] [data-block-action="translate"]`,
-                  );
-                  setPopup({
-                    block,
-                    rect:
-                      button?.getBoundingClientRect() ??
-                      root.current!.getBoundingClientRect(),
-                  });
-                },
-              }}
-            />
-            {mode !== "translation" && (
-              <div className="pdf-reading-controls">
-                <div className="pdf-page-navigation">{pageNavigation}</div>
-              </div>
-            )}
+      <div className="translation-stage" data-covered={noteOpen}>
+        {mode === "translation" && (
+          <div className="pdf-reading-controls">
+            <div className="pdf-page-navigation">{pageNavigation}</div>
           </div>
-        }
-        translation={
-          mode !== "source" && (
+        )}
+        <TranslationPanes
+          mode={mode}
+          swapped={swapped}
+          onSwap={() => setSwapped((value) => !value)}
+          source={
             <div
-              className="translation-document"
-              ref={pane}
-              tabIndex={0}
-              aria-label="论文译文"
-              onScroll={() => {
-                hover("translation");
-                translatedScroll();
-              }}
-              onPointerLeave={() => hover("translation")}
-              onWheelCapture={() => input("translation")}
-              onPointerDownCapture={(event) => {
-                const section = (event.target as Element).closest<HTMLElement>(
-                  "[data-translation-block]",
-                );
-                pressedBlock.current =
-                  section && event.button === 0
-                    ? {
-                        id: section.dataset.translationBlock!,
-                        x: event.clientX,
-                        y: event.clientY,
-                      }
-                    : undefined;
-                input("translation");
-                hover("translation");
-                selecting.current = true;
-                selection.current = null;
-                events.selection(null);
-                setLinked(undefined);
-                void engine?.focusSentences?.("", []);
-              }}
-              onPointerUp={translatedSelection}
-              onDoubleClick={(event) => {
-                // Select the translated sentence; untranslated text falls
-                // back to the sentence around the word.
-                const target = event.target as Element;
-                const sentence = target.closest(".translation-sentence");
-                const selected = window.getSelection();
-                if (sentence && selected) {
-                  const range = document.createRange();
-                  range.selectNodeContents(sentence);
-                  selected.removeAllRanges();
-                  selected.addRange(range);
-                } else {
-                  const section = target.closest("section");
-                  if (section) selectSentence(selected, section);
-                }
-                translatedSelection();
-              }}
-              onKeyDownCapture={() => input("translation")}
-              onKeyUp={translatedSelection}
-              style={{
-                fontSize: `${theme.translationFontSize ?? 1}rem`,
-                fontFamily: translationFont(theme.translationFontFamily),
-                fontWeight:
-                  (theme.translationFontWeight ??
-                    defaultTheme.translationFontWeight) === "bold"
-                    ? 600
-                    : undefined,
-                lineHeight: theme.lineHeight,
-              }}
+              className="translation-source"
+              inert={mode === "translation"}
+              onWheelCapture={() => input("source")}
+              onPointerDownCapture={() => input("source")}
+              onKeyDownCapture={() => input("source")}
             >
-              {error && <p role="alert">{error}</p>}
-              {!visibleBlocks.length && (
-                <p role="status">
-                  {doc.library === "books"
-                    ? "尚未翻译任何章节，可在工具栏翻译本章。"
-                    : "正文仍在解析中，完成的段落会在这里显示。"}
-                </p>
-              )}
-              {processing?.incomplete && (
-                <p className="translation-warning">
-                  部分页面没有可提取文字，需要 OCR；当前译文不完整。
-                </p>
-              )}
-              {visibleBlocks.map((block) => {
-                const translated = byId.get(block.id),
-                  noteIndexes = annotations.flatMap((a) => {
-                    const mark =
-                      a.location.type === "pdf"
-                        ? a.location.translation
-                        : undefined;
-                    const pair =
-                      a.location.type === "pdf" &&
-                      theme.linkTranslationAnnotations !== false
-                        ? a.location.sentenceLink
-                        : undefined;
-                    if (pair?.origin === "source")
-                      return pair.parts
-                        .filter(
-                          (p) =>
-                            p.blockId === block.id &&
-                            p.sourceHash === translated?.sourceHash,
-                        )
-                        .map((p) => p.sentenceIndex);
-                    return mark
-                      ? (mark.ranges ?? [mark])
-                          .filter(
-                            (r) =>
-                              r.blockId === block.id &&
-                              r.sourceHash === translated?.sourceHash,
-                          )
-                          .flatMap((r) => r.sentenceIndexes)
-                      : [];
-                  });
-                return (
-                  <section
-                    key={block.id}
-                    data-translation-block={block.id}
-                    data-block-kind={block.image ? "image" : "text"}
-                    data-label={block.label}
-                    data-hovered={hoveredBlock === block.id || undefined}
-                    data-focused={focusedBlock === block.id || undefined}
-                    data-search-hit={
-                      searchBlockIds.includes(block.id) || undefined
+              <ReaderView
+                document={doc}
+                theme={theme}
+                annotations={annotations.filter(
+                  (a) => a.location.type !== "pdf" || !a.location.translation,
+                )}
+                blocks={blocks}
+                onReady={ready}
+                events={{
+                  ...events,
+                  selection: sourceSelection,
+                  blockFocus: (block) => focusBlock(block, "source"),
+                  location: (location, percentage) => {
+                    if (
+                      state.current.mode !== "translation" &&
+                      side.current === "source"
+                    )
+                      events.location(location, percentage);
+                  },
+                  readingAnchor: (anchor) => {
+                    if (
+                      explicitFocus.current.moving ||
+                      !control.current.canFollow("source") ||
+                      selecting.current
+                    )
+                      return;
+                    recordReading(anchor);
+                    if (state.current.mode === "parallel")
+                      followTranslation(anchor);
+                  },
+                  blockHover: (block) => {
+                    if (mode === "parallel") hover("source", block?.id);
+                  },
+                  blockAction: (block, action) => {
+                    if (action !== "translate") {
+                      events.blockAction?.(block, action);
+                      return;
                     }
-                    aria-current={focusedBlock === block.id || undefined}
-                    tabIndex={0}
-                    onClick={(event) => {
-                      const pressed = pressedBlock.current;
-                      pressedBlock.current = undefined;
-                      if (
-                        (event.target as Element).closest(
-                          "a, button, input, textarea, select, [role=button], [contenteditable=true]",
-                        ) ||
-                        window.getSelection()?.toString().trim() ||
-                        (event.detail > 0 &&
-                          (!pressed ||
-                            pressed.id !== block.id ||
-                            Math.hypot(
-                              event.clientX - pressed.x,
-                              event.clientY - pressed.y,
-                            ) > 5))
-                      )
-                        return;
-                      focusTranslation(block);
-                    }}
-                    onKeyDown={(event) => {
-                      if (
-                        event.target === event.currentTarget &&
-                        (event.key === "Enter" || event.key === " ")
-                      ) {
-                        event.preventDefault();
-                        focusTranslation(block);
-                      }
-                    }}
-                    onPointerEnter={(event) => {
-                      if (!event.buttons && !selecting.current)
-                        hover("translation", block.id);
-                    }}
-                    onPointerMove={(event) => {
-                      if (!event.buttons && !selecting.current)
-                        hover("translation", block.id);
-                    }}
-                    onPointerLeave={() => hover("translation")}
-                    className={
-                      noteIndexes.length ? "translation-annotated" : ""
-                    }
-                  >
-                    <TranslationText
-                      block={block}
-                      onCitation={(blockId, label) =>
-                        void visitCitation(blockId, label)
-                      }
-                      formulaNumber={equationNumbers.byFormula.get(block.id)}
-                      translation={translated}
-                      documentId={doc.id}
-                      renderImage={blockImages?.url}
-                      retry={() => void translate(block.id)}
-                      paused={processing?.enabled === false}
-                      linked={linked?.[block.id] ?? []}
-                    />
-                    {noteIndexes.length > 0 && (
-                      <span
-                        className="translation-note-indicator"
-                        title="此段有已保存的标注"
-                        aria-label="此段有已保存的标注"
-                      />
-                    )}
-                  </section>
-                );
-              })}
-            </div>
-          )
-        }
-      />
-      <Popover
-        open={!!popup}
-        onOpenChange={(open) => {
-          if (!open) setPopup(undefined);
-        }}
-      >
-        <PopoverContent
-          anchor={
-            popup ? { getBoundingClientRect: () => popup.rect } : undefined
-          }
-          className="translation-popover"
-          side="bottom"
-          align="end"
-        >
-          {popup && (
-            <>
-              <TranslationText
-                block={popup.block}
-                onCitation={(blockId, label) =>
-                  void visitCitation(blockId, label)
-                }
-                formulaNumber={equationNumbers.byFormula.get(popup.block.id)}
-                translation={activePopup}
-                documentId={doc.id}
-                renderImage={blockImages?.url}
-                retry={() => void translate(popup.block.id)}
-                paused={processing?.enabled === false}
+                    const button = root.current?.querySelector<HTMLElement>(
+                      `[data-block-id="${block.id}"] [data-block-action="translate"]`,
+                    );
+                    setPopup({
+                      block,
+                      rect:
+                        button?.getBoundingClientRect() ??
+                        root.current!.getBoundingClientRect(),
+                    });
+                  },
+                }}
               />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  recordReading({ blockId: popup.block.id, fraction: 0 });
-                  changeMode("parallel");
+              {mode !== "translation" && (
+                <div className="pdf-reading-controls">
+                  <div className="pdf-page-navigation">{pageNavigation}</div>
+                </div>
+              )}
+            </div>
+          }
+          translation={
+            mode !== "source" && (
+              <div
+                className="translation-document"
+                ref={pane}
+                tabIndex={0}
+                aria-label="论文译文"
+                onScroll={() => {
+                  hover("translation");
+                  translatedScroll();
+                }}
+                onPointerLeave={() => hover("translation")}
+                onWheelCapture={() => input("translation")}
+                onPointerDownCapture={(event) => {
+                  const section = (
+                    event.target as Element
+                  ).closest<HTMLElement>("[data-translation-block]");
+                  pressedBlock.current =
+                    section && event.button === 0
+                      ? {
+                          id: section.dataset.translationBlock!,
+                          x: event.clientX,
+                          y: event.clientY,
+                        }
+                      : undefined;
+                  input("translation");
+                  hover("translation");
+                  selecting.current = true;
+                  selection.current = null;
+                  events.selection(null);
+                  setLinked(undefined);
+                  void engine?.focusSentences?.("", []);
+                }}
+                onPointerUp={translatedSelection}
+                onDoubleClick={(event) => {
+                  // Select the translated sentence; untranslated text falls
+                  // back to the sentence around the word.
+                  const target = event.target as Element;
+                  const sentence = target.closest(".translation-sentence");
+                  const selected = window.getSelection();
+                  if (sentence && selected) {
+                    const range = document.createRange();
+                    range.selectNodeContents(sentence);
+                    selected.removeAllRanges();
+                    selected.addRange(range);
+                  } else {
+                    const section = target.closest("section");
+                    if (section) selectSentence(selected, section);
+                  }
+                  translatedSelection();
+                }}
+                onKeyDownCapture={() => input("translation")}
+                onKeyUp={translatedSelection}
+                style={{
+                  fontSize: `${theme.translationFontSize ?? 1}rem`,
+                  fontFamily: translationFont(theme.translationFontFamily),
+                  fontWeight:
+                    (theme.translationFontWeight ??
+                      defaultTheme.translationFontWeight) === "bold"
+                      ? 600
+                      : undefined,
+                  lineHeight: theme.lineHeight,
                 }}
               >
-                进入双栏对照
-              </Button>
-            </>
-          )}
-        </PopoverContent>
-      </Popover>
+                {error && <p role="alert">{error}</p>}
+                {!visibleBlocks.length && (
+                  <p role="status">
+                    {doc.library === "books"
+                      ? "尚未翻译任何章节，可在工具栏翻译本章。"
+                      : "正文仍在解析中，完成的段落会在这里显示。"}
+                  </p>
+                )}
+                {processing?.incomplete && (
+                  <p className="translation-warning">
+                    部分页面没有可提取文字，需要 OCR；当前译文不完整。
+                  </p>
+                )}
+                {visibleBlocks.map((block) => {
+                  const translated = byId.get(block.id),
+                    noteIndexes = annotations.flatMap((a) => {
+                      const mark =
+                        a.location.type === "pdf"
+                          ? a.location.translation
+                          : undefined;
+                      const pair =
+                        a.location.type === "pdf" &&
+                        theme.linkTranslationAnnotations !== false
+                          ? a.location.sentenceLink
+                          : undefined;
+                      if (pair?.origin === "source")
+                        return pair.parts
+                          .filter(
+                            (p) =>
+                              p.blockId === block.id &&
+                              p.sourceHash === translated?.sourceHash,
+                          )
+                          .map((p) => p.sentenceIndex);
+                      return mark
+                        ? (mark.ranges ?? [mark])
+                            .filter(
+                              (r) =>
+                                r.blockId === block.id &&
+                                r.sourceHash === translated?.sourceHash,
+                            )
+                            .flatMap((r) => r.sentenceIndexes)
+                        : [];
+                    });
+                  return (
+                    <section
+                      key={block.id}
+                      data-translation-block={block.id}
+                      data-block-kind={block.image ? "image" : "text"}
+                      data-label={block.label}
+                      data-hovered={hoveredBlock === block.id || undefined}
+                      data-focused={focusedBlock === block.id || undefined}
+                      data-search-hit={
+                        searchBlockIds.includes(block.id) || undefined
+                      }
+                      aria-current={focusedBlock === block.id || undefined}
+                      tabIndex={0}
+                      onClick={(event) => {
+                        const pressed = pressedBlock.current;
+                        pressedBlock.current = undefined;
+                        if (
+                          (event.target as Element).closest(
+                            "a, button, input, textarea, select, [role=button], [contenteditable=true]",
+                          ) ||
+                          window.getSelection()?.toString().trim() ||
+                          (event.detail > 0 &&
+                            (!pressed ||
+                              pressed.id !== block.id ||
+                              Math.hypot(
+                                event.clientX - pressed.x,
+                                event.clientY - pressed.y,
+                              ) > 5))
+                        )
+                          return;
+                        focusTranslation(block);
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          event.target === event.currentTarget &&
+                          (event.key === "Enter" || event.key === " ")
+                        ) {
+                          event.preventDefault();
+                          focusTranslation(block);
+                        }
+                      }}
+                      onPointerEnter={(event) => {
+                        if (!event.buttons && !selecting.current)
+                          hover("translation", block.id);
+                      }}
+                      onPointerMove={(event) => {
+                        if (!event.buttons && !selecting.current)
+                          hover("translation", block.id);
+                      }}
+                      onPointerLeave={() => hover("translation")}
+                      className={
+                        noteIndexes.length ? "translation-annotated" : ""
+                      }
+                    >
+                      <TranslationText
+                        block={block}
+                        onCitation={(blockId, label) =>
+                          void visitCitation(blockId, label)
+                        }
+                        formulaNumber={equationNumbers.byFormula.get(block.id)}
+                        translation={translated}
+                        documentId={doc.id}
+                        renderImage={blockImages?.url}
+                        retry={() => void translate(block.id)}
+                        paused={processing?.enabled === false}
+                        linked={linked?.[block.id] ?? []}
+                      />
+                      {noteIndexes.length > 0 && (
+                        <span
+                          className="translation-note-indicator"
+                          title="此段有已保存的标注"
+                          aria-label="此段有已保存的标注"
+                        />
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            )
+          }
+        />
+        <Popover
+          open={!!popup}
+          onOpenChange={(open) => {
+            if (!open) setPopup(undefined);
+          }}
+        >
+          <PopoverContent
+            anchor={
+              popup ? { getBoundingClientRect: () => popup.rect } : undefined
+            }
+            className="translation-popover"
+            side="bottom"
+            align="end"
+          >
+            {popup && (
+              <>
+                <TranslationText
+                  block={popup.block}
+                  onCitation={(blockId, label) =>
+                    void visitCitation(blockId, label)
+                  }
+                  formulaNumber={equationNumbers.byFormula.get(popup.block.id)}
+                  translation={activePopup}
+                  documentId={doc.id}
+                  renderImage={blockImages?.url}
+                  retry={() => void translate(popup.block.id)}
+                  paused={processing?.enabled === false}
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    recordReading({ blockId: popup.block.id, fraction: 0 });
+                    changeMode("parallel");
+                  }}
+                >
+                  进入双栏对照
+                </Button>
+              </>
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
+      {noteOpen && <DocumentNotePage documentId={doc.id} />}
     </div>
   );
 }

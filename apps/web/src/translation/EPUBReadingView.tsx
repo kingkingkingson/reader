@@ -21,6 +21,7 @@ import { Button } from "@reader/ui/components/button";
 import { toast } from "sonner";
 import { ReaderView } from "../ReaderView";
 import { AssistanceControls } from "./AssistanceControls";
+import { DocumentNotePage } from "../DocumentNotePage";
 import { TranslationPanes } from "./TranslationPanes";
 import { TranslationText } from "./TranslationText";
 import { translatedSelection } from "./selection";
@@ -50,6 +51,7 @@ export function EPUBReadingView({
   pageNavigation?: ReactNode;
 }) {
   const [mode, setMode] = useState<Mode>("source");
+  const [noteOpen, setNoteOpen] = useState(false);
   const [swapped, setSwapped] = useState(false);
   const [blocks, setBlocks] = useState<EPUBReadingBlock[]>([]);
   const { translations, error: streamError } = useTranslations(doc.id);
@@ -345,11 +347,28 @@ export function EPUBReadingView({
         library="books"
         epubChapter={() => position.current}
       />
-      <Tabs value={mode} onValueChange={(value) => changeMode(value as Mode)}>
+      <Tabs
+        value={noteOpen ? "note" : mode}
+        onValueChange={(value) => {
+          if (value === "note") {
+            setNoteOpen(true);
+            return;
+          }
+          if (
+            value !== "source" &&
+            value !== "parallel" &&
+            value !== "translation"
+          )
+            return;
+          setNoteOpen(false);
+          if (value !== mode) changeMode(value);
+        }}
+      >
         <TabsList>
           <TabsTrigger value="source">仅原文</TabsTrigger>
           <TabsTrigger value="parallel">原文译文</TabsTrigger>
           <TabsTrigger value="translation">仅译文</TabsTrigger>
+          <TabsTrigger value="note">笔记</TabsTrigger>
         </TabsList>
       </Tabs>
     </div>
@@ -357,241 +376,246 @@ export function EPUBReadingView({
   return (
     <div className="epub-reading" data-theme={theme.mode}>
       {toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar}
-      <TranslationPanes
-        mode={mode}
-        swapped={swapped}
-        onSwap={() => setSwapped((v) => !v)}
-        source={
-          <div className="translation-source">
-            <ReaderView
-              document={doc}
-              theme={theme}
-              annotations={annotations}
-              onReady={(adapter, toc) => {
-                engine.current = adapter;
-                const initial = adapter.getLocation();
-                if (initial?.type === "epub") {
-                  position.current = initial;
-                  setChapter(initial.href.split("#")[0]);
-                }
-                adapter.setEPUBBlocks?.(live.current.blocks);
-                const overrides: Partial<ReaderAdapter> = {
-                  goTo: go,
-                  next: () => step(1),
-                  previous: () => step(-1),
-                  clearSelection: clear,
-                  getSelection: () => selection.current,
-                  getLocation: () => position.current,
-                  getContext: async () => {
-                    const href = position.current.href.split("#")[0];
-                    const chapter = live.current.blocks.filter(
-                      (b) => b.location.href === href && !b.image,
-                    );
-                    return live.current.blocks.length
-                      ? chapter
-                          .map((b) => b.text)
-                          .join("\n\n")
-                          .slice(0, 24000)
-                      : adapter.getContext();
-                  },
-                };
-                onReady(
-                  new Proxy(adapter, {
-                    get(target, key: keyof ReaderAdapter) {
-                      const value = overrides[key] ?? target[key];
-                      return typeof value === "function"
-                        ? value.bind(target)
-                        : value;
+      <div className="translation-stage" data-covered={noteOpen}>
+        <TranslationPanes
+          mode={mode}
+          swapped={swapped}
+          onSwap={() => setSwapped((v) => !v)}
+          source={
+            <div className="translation-source">
+              <ReaderView
+                document={doc}
+                theme={theme}
+                annotations={annotations}
+                onReady={(adapter, toc) => {
+                  engine.current = adapter;
+                  const initial = adapter.getLocation();
+                  if (initial?.type === "epub") {
+                    position.current = initial;
+                    setChapter(initial.href.split("#")[0]);
+                  }
+                  adapter.setEPUBBlocks?.(live.current.blocks);
+                  const overrides: Partial<ReaderAdapter> = {
+                    goTo: go,
+                    next: () => step(1),
+                    previous: () => step(-1),
+                    clearSelection: clear,
+                    getSelection: () => selection.current,
+                    getLocation: () => position.current,
+                    getContext: async () => {
+                      const href = position.current.href.split("#")[0];
+                      const chapter = live.current.blocks.filter(
+                        (b) => b.location.href === href && !b.image,
+                      );
+                      return live.current.blocks.length
+                        ? chapter
+                            .map((b) => b.text)
+                            .join("\n\n")
+                            .slice(0, 24000)
+                        : adapter.getContext();
                     },
-                  }),
-                  toc,
+                  };
+                  onReady(
+                    new Proxy(adapter, {
+                      get(target, key: keyof ReaderAdapter) {
+                        const value = overrides[key] ?? target[key];
+                        return typeof value === "function"
+                          ? value.bind(target)
+                          : value;
+                      },
+                    }),
+                    toc,
+                  );
+                }}
+                events={{
+                  ...events,
+                  epubInteraction: () => {
+                    side.current = "source";
+                    syncTarget.current = undefined;
+                    void engine.current?.focusEPUBLocations?.([]);
+                    if (selection.current?.location.translation) {
+                      selection.current = null;
+                      window.getSelection()?.removeAllRanges();
+                      live.current.events.selection(null);
+                    }
+                  },
+                  location: (location, percent) => {
+                    if (
+                      location.type !== "epub" ||
+                      side.current === "translation"
+                    )
+                      return;
+                    position.current = location;
+                    setChapter(location.href);
+                    live.current.events.location(location, percent);
+                  },
+                  epubReadingAnchor: (id) => {
+                    if (
+                      side.current === "source" &&
+                      live.current.mode === "parallel"
+                    )
+                      follow(id);
+                  },
+                  selection: (value) => {
+                    if (
+                      !value &&
+                      (side.current === "translation" || navigating.current)
+                    )
+                      return;
+                    side.current = "source";
+                    selection.current = value;
+                    live.current.events.selection(value);
+                    if (value?.location.type === "epub") {
+                      const matches = epubBlocksAt(
+                        value.location,
+                        live.current.blocks,
+                      );
+                      const selectedRange = epubOffsets(value.location);
+                      const links = Object.fromEntries(
+                        matches.map((block) => {
+                          const translated = live.current.translations.find(
+                            (t) => t.blockId === block.id,
+                          );
+                          const indexes =
+                            translated?.sentences.flatMap((_, index) => {
+                              const range = epubOffsets(
+                                epubSentenceLocation(
+                                  block,
+                                  translated.sentences,
+                                  [index],
+                                ),
+                              );
+                              return !selectedRange ||
+                                !range ||
+                                (range.start < selectedRange.end &&
+                                  selectedRange.start < range.end)
+                                ? [index]
+                                : [];
+                            }) ?? [];
+                          return [block.id, indexes];
+                        }),
+                      );
+                      setLinked(links);
+                      if (matches[0] && live.current.mode === "parallel")
+                        follow(matches[0].id);
+                    } else setLinked({});
+                  },
+                }}
+              />
+            </div>
+          }
+          translation={
+            <div
+              ref={pane}
+              className="translation-document"
+              style={{
+                fontSize: `${theme.translationFontSize ?? 1}rem`,
+                fontFamily: translationFont(theme.translationFontFamily),
+                fontWeight:
+                  (theme.translationFontWeight ??
+                    defaultTheme.translationFontWeight) === "bold"
+                    ? 600
+                    : undefined,
+                lineHeight: theme.lineHeight,
+              }}
+              onPointerDown={() => {
+                side.current = "translation";
+                dragging.current = true;
+              }}
+              onPointerUp={capture}
+              onKeyUp={capture}
+              onWheel={() => {
+                side.current = "translation";
+              }}
+              onScroll={scroll}
+              onClick={(event) => {
+                if (window.getSelection()?.toString().trim() || !pane.current)
+                  return;
+                const hits = translatedAnnotationRanges(
+                  pane.current,
+                  annotations,
+                  translations,
+                ).filter(({ range }) =>
+                  Array.from(range.getClientRects()).some(
+                    (r) =>
+                      event.clientX >= r.left &&
+                      event.clientX <= r.right &&
+                      event.clientY >= r.top &&
+                      event.clientY <= r.bottom,
+                  ),
+                );
+                live.current.events.annotation?.(
+                  hits.length
+                    ? {
+                        ids: hits.map((h) => h.annotation.id),
+                        anchor: {
+                          x: event.clientX,
+                          top: event.clientY - 8,
+                          bottom: event.clientY + 8,
+                        },
+                      }
+                    : null,
                 );
               }}
-              events={{
-                ...events,
-                epubInteraction: () => {
-                  side.current = "source";
-                  syncTarget.current = undefined;
-                  void engine.current?.focusEPUBLocations?.([]);
-                  if (selection.current?.location.translation) {
-                    selection.current = null;
-                    window.getSelection()?.removeAllRanges();
-                    live.current.events.selection(null);
-                  }
-                },
-                location: (location, percent) => {
-                  if (
-                    location.type !== "epub" ||
-                    side.current === "translation"
-                  )
-                    return;
-                  position.current = location;
-                  setChapter(location.href);
-                  live.current.events.location(location, percent);
-                },
-                epubReadingAnchor: (id) => {
-                  if (
-                    side.current === "source" &&
-                    live.current.mode === "parallel"
-                  )
-                    follow(id);
-                },
-                selection: (value) => {
-                  if (
-                    !value &&
-                    (side.current === "translation" || navigating.current)
-                  )
-                    return;
-                  side.current = "source";
-                  selection.current = value;
-                  live.current.events.selection(value);
-                  if (value?.location.type === "epub") {
-                    const matches = epubBlocksAt(
-                      value.location,
-                      live.current.blocks,
-                    );
-                    const selectedRange = epubOffsets(value.location);
-                    const links = Object.fromEntries(
-                      matches.map((block) => {
-                        const translated = live.current.translations.find(
-                          (t) => t.blockId === block.id,
-                        );
-                        const indexes =
-                          translated?.sentences.flatMap((_, index) => {
-                            const range = epubOffsets(
-                              epubSentenceLocation(
-                                block,
-                                translated.sentences,
-                                [index],
-                              ),
-                            );
-                            return !selectedRange ||
-                              !range ||
-                              (range.start < selectedRange.end &&
-                                selectedRange.start < range.end)
-                              ? [index]
-                              : [];
-                          }) ?? [];
-                        return [block.id, indexes];
-                      }),
-                    );
-                    setLinked(links);
-                    if (matches[0] && live.current.mode === "parallel")
-                      follow(matches[0].id);
-                  } else setLinked({});
-                },
-              }}
-            />
-          </div>
-        }
-        translation={
-          <div
-            ref={pane}
-            className="translation-document"
-            style={{
-              fontSize: `${theme.translationFontSize ?? 1}rem`,
-              fontFamily: translationFont(theme.translationFontFamily),
-              fontWeight:
-                (theme.translationFontWeight ??
-                  defaultTheme.translationFontWeight) === "bold"
-                  ? 600
-                  : undefined,
-              lineHeight: theme.lineHeight,
-            }}
-            onPointerDown={() => {
-              side.current = "translation";
-              dragging.current = true;
-            }}
-            onPointerUp={capture}
-            onKeyUp={capture}
-            onWheel={() => {
-              side.current = "translation";
-            }}
-            onScroll={scroll}
-            onClick={(event) => {
-              if (window.getSelection()?.toString().trim() || !pane.current)
-                return;
-              const hits = translatedAnnotationRanges(
-                pane.current,
-                annotations,
-                translations,
-              ).filter(({ range }) =>
-                Array.from(range.getClientRects()).some(
-                  (r) =>
-                    event.clientX >= r.left &&
-                    event.clientX <= r.right &&
-                    event.clientY >= r.top &&
-                    event.clientY <= r.bottom,
-                ),
-              );
-              live.current.events.annotation?.(
-                hits.length
-                  ? {
-                      ids: hits.map((h) => h.annotation.id),
-                      anchor: {
-                        x: event.clientX,
-                        top: event.clientY - 8,
-                        bottom: event.clientY + 8,
-                      },
+            >
+              {(error ||
+                streamError ||
+                processing?.status === "waiting" ||
+                processing?.status === "failed") && (
+                <div className="translation-warning">
+                  {error || streamError || processing?.detail}
+                  {processing?.status === "failed" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        void api
+                          .setAssistance(doc.id, "resume")
+                          .catch((e) => toast.error(e.message))
+                      }
+                    >
+                      重试翻译
+                    </Button>
+                  )}
+                </div>
+              )}
+              {!blocks.length && (
+                <p className="translation-warning">
+                  {error ||
+                    (processing?.status === "complete"
+                      ? "此书没有可翻译的正文文字"
+                      : "正在读取正文段落…")}
+                </p>
+              )}
+              {visible.map((block) => (
+                <section
+                  key={block.id}
+                  data-translation-block={block.id}
+                  data-label={block.label}
+                  data-chapter={block.location.href}
+                >
+                  <TranslationText
+                    block={block}
+                    imageURL={
+                      block.image
+                        ? publicationURL(doc.id, block.image)
+                        : undefined
                     }
-                  : null,
-              );
-            }}
-          >
-            {(error ||
-              streamError ||
-              processing?.status === "waiting" ||
-              processing?.status === "failed") && (
-              <div className="translation-warning">
-                {error || streamError || processing?.detail}
-                {processing?.status === "failed" && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() =>
-                      void api
-                        .setAssistance(doc.id, "resume")
-                        .catch((e) => toast.error(e.message))
-                    }
-                  >
-                    重试翻译
-                  </Button>
-                )}
-              </div>
-            )}
-            {!blocks.length && (
-              <p className="translation-warning">
-                {error ||
-                  (processing?.status === "complete"
-                    ? "此书没有可翻译的正文文字"
-                    : "正在读取正文段落…")}
-              </p>
-            )}
-            {visible.map((block) => (
-              <section
-                key={block.id}
-                data-translation-block={block.id}
-                data-label={block.label}
-                data-chapter={block.location.href}
-              >
-                <TranslationText
-                  block={block}
-                  imageURL={
-                    block.image
-                      ? publicationURL(doc.id, block.image)
-                      : undefined
-                  }
-                  documentId={doc.id}
-                  translation={translations.find((t) => t.blockId === block.id)}
-                  paused={processing?.enabled === false}
-                  retry={() => retry(block.id)}
-                  linked={linked[block.id]}
-                />
-              </section>
-            ))}
-          </div>
-        }
-      />
+                    documentId={doc.id}
+                    translation={translations.find(
+                      (t) => t.blockId === block.id,
+                    )}
+                    paused={processing?.enabled === false}
+                    retry={() => retry(block.id)}
+                    linked={linked[block.id]}
+                  />
+                </section>
+              ))}
+            </div>
+          }
+        />
+      </div>
+      {noteOpen && <DocumentNotePage documentId={doc.id} />}
     </div>
   );
 }

@@ -179,6 +179,25 @@
   background: #f7f6f2;
   color: #1f1e1d;
 }
+.pdf-reading[data-theme="cream"],
+.epub-reading[data-theme="cream"],
+.pdf-reading[data-theme="cream"] .reader-engine,
+.pdf-reading[data-theme="cream"] .pdfViewer {
+  background: #eeede7;
+}
+.pdf-reading[data-theme="cream"] .pdfViewer .page,
+.pdf-reading[data-theme="cream"] .pdfViewer .canvasWrapper {
+  background-color: #f4ecd8 !important;
+}
+/* PDF.js hides .page::after after load, so tint the canvas against this paper color. */
+.pdf-reading[data-theme="cream"] .pdfViewer .canvasWrapper canvas {
+  mix-blend-mode: multiply;
+}
+.pdf-reading[data-theme="cream"] .pdf-page-navigation,
+.epub-reading[data-theme="cream"] .pdf-page-navigation {
+  background: #eeede7;
+  color: #1f1e1d;
+}
 
 .textLayer ::highlight(reader-linked-sentences) {
   /* A subtle linked-sentence cue; visible glyphs remain on the PDF canvas. */
@@ -208,6 +227,11 @@
 .pdf-reading[data-theme="sepia"] .translation-document,
 .epub-reading[data-theme="sepia"] .translation-document {
   background: #f7f6f2;
+  color: #1f1e1d;
+}
+.pdf-reading[data-theme="cream"] .translation-document,
+.epub-reading[data-theme="cream"] .translation-document {
+  background: #eeede7;
   color: #1f1e1d;
 }
 ::highlight(reader-translation-marks) {

@@ -23,6 +23,8 @@ import {
   Tag,
   PanelLeft,
   Search,
+  BookOpen,
+  FileText,
   Star,
   StickyNote,
   Highlighter,
@@ -454,9 +456,14 @@ export function PaperLibrary({
       }
     }
   };
-  const renderRow = (doc: Document, tableColumns?: PaperColumn[]) => (
+  const renderRow = (
+    doc: Document,
+    tableColumns?: PaperColumn[],
+    index = 0,
+  ) => (
     <PaperRow
       columns={tableColumns}
+      band={index}
       key={doc.id}
       doc={doc}
       job={jobs.get(doc.id)}
@@ -844,7 +851,9 @@ export function PaperLibrary({
                         </Button>
                       </header>
                       <div role="list">
-                        {group.map((doc) => renderRow(doc))}
+                        {group.map((doc, index) =>
+                          renderRow(doc, undefined, index),
+                        )}
                       </div>
                     </section>
                   ))}
@@ -908,13 +917,17 @@ export function PaperLibrary({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {visible.map((doc) => renderRow(doc, columns))}
+                      {visible.map((doc, index) =>
+                        renderRow(doc, columns, index),
+                      )}
                     </TableBody>
                   </Table>
                 </div>
               ) : (
                 <div className="paper-list" ref={listRef} role="list">
-                  {visible.map((doc) => renderRow(doc))}
+                  {visible.map((doc, index) =>
+                    renderRow(doc, undefined, index),
+                  )}
                 </div>
               )
             ) : (
@@ -1098,6 +1111,7 @@ function PaperRow({
   picked,
   colors,
   columns,
+  band,
   dragIds,
   onActivate,
   onOpen,
@@ -1112,6 +1126,8 @@ function PaperRow({
   colors: { name: string; color: string }[];
   /** Table columns; the row renders as a list card without them. */
   columns?: PaperColumn[];
+  /** Odd rows use the deeper band so neighboring entries stay distinct. */
+  band: number;
   dragIds: () => string[];
   onActivate: (e: React.MouseEvent | React.KeyboardEvent) => void;
   onOpen: () => void;
@@ -1119,6 +1135,11 @@ function PaperRow({
   moreMenu: React.ReactNode;
 }) {
   const byline = paperByline(doc);
+  const typeIcon = (
+    <span className="paper-type-icon" data-type={doc.type} aria-hidden="true">
+      {doc.type === "epub" ? <BookOpen /> : <FileText />}
+    </span>
+  );
   const percent = Math.round(doc.percentage * 100);
   const check = picking && (
     <span className="paper-row-check" data-row-action>
@@ -1228,6 +1249,7 @@ function PaperRow({
         render={columns ? <tr /> : <article />}
         role={columns ? undefined : "listitem"}
         className={columns ? "paper-table-row" : "paper-row"}
+        data-band={band % 2 === 0 ? "shallow" : "deep"}
         data-paper-id={doc.id}
         data-selected={selected || undefined}
         data-picked={picked || undefined}
@@ -1264,6 +1286,7 @@ function PaperRow({
             {picking && <TableCell className="w-8">{check}</TableCell>}
             <TableCell className="paper-table-title">
               <div className="paper-table-title-content">
+                {typeIcon}
                 {title}
                 <PaperProcessing job={job} />
               </div>
@@ -1278,6 +1301,7 @@ function PaperRow({
         ) : (
           <>
             {check}
+            {typeIcon}
             <div className="paper-row-main">
               {title}
               {byline && (

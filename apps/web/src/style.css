@@ -94,6 +94,27 @@
 :root[data-theme="sepia"] .effort-panel {
   --effort-blue: var(--brand-90);
 }
+/* Cream: the sheet stays #f4ecd8. Chrome and the gutter use #eeede7. */
+:root[data-theme="cream"] {
+  color-scheme: light;
+  --background: #eeede7;
+  --foreground: #1f1e1d;
+  --card: #eeede7;
+  --card-foreground: #1f1e1d;
+  --popover: #eeede7;
+  --popover-foreground: #1f1e1d;
+  --secondary: #eeede7;
+  --secondary-foreground: #1f1e1d;
+  --muted: #eeede7;
+  --muted-foreground: #73726c;
+  --accent: #e2e1db;
+  --accent-foreground: #1f1e1d;
+  --border: #e2e1db;
+  --input: #e2e1db;
+}
+:root[data-theme="cream"] .app {
+  background: #eeede7;
+}
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -160,9 +181,16 @@ kbd {
 }
 .app {
   display: flex;
+  flex-direction: column;
   height: 100dvh;
   overflow: hidden;
   background: color-mix(in oklch, var(--muted) 60%, var(--background));
+}
+.app-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 .library-sidebar {
   --sidebar-width: 238px;
@@ -499,35 +527,126 @@ kbd {
   font-size: 12px;
 }
 .workspace {
-  width: 100%;
-  height: 100%;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
+.reader-chrome {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--muted) 72%, var(--background));
+}
+.reader-tab-safe {
+  display: none;
+}
+.reader-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  min-width: 0;
+  padding: 0 10px;
+  overflow-x: auto;
+  background: transparent;
+  scrollbar-width: none;
+}
+.app[data-platform="darwin"] .reader-tabs {
+  height: 40px;
+  padding-left: 100px;
+}
+.reader-tabs::-webkit-scrollbar {
+  display: none;
+}
+.reader-tab {
+  display: flex;
+  flex: 0 0 180px;
+  align-items: center;
+  width: 180px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foreground);
+}
+.reader-tab[data-active="true"] {
+  border-color: color-mix(in oklch, var(--foreground) 16%, var(--border));
+  background: var(--background);
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 8%, transparent);
+}
+.reader-tab-select {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px 0 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.reader-tab-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.reader-tab-icon[data-type="library"] {
+  color: #3b6fd8;
+}
+.reader-tab-icon[data-type="pdf"] {
+  color: #d6453d;
+}
+.reader-tab-icon[data-type="epub"] {
+  color: #2f9e6b;
+}
+.reader-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+}
+.reader-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.reader-tab-close svg {
+  width: 12px;
+  height: 12px;
+}
+.reader-tab-close:hover {
+  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
 .reader-toolbar {
-  height: 58px;
+  height: 52px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 17px;
   gap: 15px;
-  border-bottom: 1px solid var(--border);
 }
 .reader-title-group {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
-}
-.reader-title {
-  min-width: 0;
-  max-width: 360px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
 }
 .toolbar-divider {
   height: 18px;
@@ -540,6 +659,11 @@ kbd {
   flex-shrink: 0;
   align-items: center;
   gap: 7px;
+}
+.pdf-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .reader-panels {
   flex: 1;
@@ -586,10 +710,11 @@ kbd {
   gap: 8px;
 }
 .panel-tabs [data-slot="tabs-trigger"] {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
   gap: 6px;
   border: 0;
+  color: var(--foreground);
 }
 .panel-label {
   font-size: 9px;
@@ -615,13 +740,13 @@ kbd {
   gap: 8px;
   white-space: normal;
   text-align: left;
-  font-size: 11px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.5;
   font-weight: 400;
   margin: 3px 0;
   padding-top: 8px;
   padding-bottom: 8px;
-  color: var(--muted-foreground);
+  color: var(--foreground);
 }
 .toc-item.selected {
   color: var(--foreground);
@@ -638,17 +763,17 @@ kbd {
 }
 .toc-item small {
   flex-shrink: 0;
-  font-size: 10px;
-  opacity: 0.6;
+  font-size: 12px;
+  opacity: 1;
   margin-left: auto;
 }
 .toc-dot {
   width: 3px;
   height: 3px;
   background: currentColor;
-  opacity: 0.4;
+  opacity: 0.7;
   border-radius: 50%;
-  margin-top: 6px;
+  margin-top: 8px;
   flex-shrink: 0;
 }
 .search-result {
@@ -688,6 +813,9 @@ kbd {
   background: #252525;
 }
 .reader-stage[data-theme="sepia"] {
+  background: #eeede7;
+}
+.reader-stage[data-theme="cream"] {
   background: #eeede7;
 }
 .reader-host {
@@ -1347,9 +1475,6 @@ kbd {
   .library-sidebar {
     --sidebar-width: 210px;
   }
-  .reader-title {
-    max-width: 210px;
-  }
   .toolbar-actions {
     gap: 2px;
   }
@@ -1372,9 +1497,6 @@ kbd {
   }
   .library-footer > span:last-child {
     display: none;
-  }
-  .reader-title {
-    max-width: 130px;
   }
   .reader-title-group {
     gap: 6px;
@@ -1753,42 +1875,23 @@ kbd {
 .window-drag-handle {
   display: none;
 }
-.app[data-platform="darwin"] .window-drag-handle {
-  display: block;
-  /* Reaches the window's top edge through the sidebar padding. */
-  height: 44px;
-  margin-top: -24px;
-  flex-shrink: 0;
-  -webkit-app-region: drag;
+.app[data-platform="darwin"] .reader-tab-safe {
+  display: none;
 }
 /* The gap above the floating library panel belongs to the window frame. */
 .window-top-drag {
   display: none;
 }
 .app[data-platform="darwin"] .window-top-drag {
-  display: block;
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 50;
-  height: 10px;
-  -webkit-app-region: drag;
+  display: none;
 }
-.app[data-platform="darwin"] :is(.library-topbar, .reader-toolbar) {
+.app[data-platform="darwin"] :is(.library-topbar, .reader-tabs) {
   -webkit-app-region: drag;
 }
 .app[data-platform="darwin"]
-  :is(.library-topbar, .reader-toolbar)
+  :is(.library-topbar, .reader-tabs)
   :is(button, input, a, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
-}
-.app[data-platform="darwin"] .reader-toolbar,
-.app[data-platform="darwin"]
-  .library-sidebar.collapsed
-  + .library-main
-  .library-topbar {
-  padding-left: 104px;
 }
 
 .reference-list {
@@ -2912,6 +3015,77 @@ textarea.paper-note-input {
   font-size: 12px;
   line-height: 1.7;
 }
+.translation-stage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.translation-stage[data-covered="true"] {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.document-note-page {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 56px clamp(20px, 4vw, 56px) 48px;
+  background: var(--background);
+}
+.document-note-switch {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.document-note-status {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.document-note-page textarea {
+  display: block;
+  flex: 1;
+  width: min(44rem, 100%);
+  min-height: 16rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  resize: none;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.document-note-page textarea:focus-visible {
+  border: 0;
+  box-shadow: none;
+}
+.document-note-preview {
+  width: min(44rem, 100%);
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.note-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.75em 0;
+  border-radius: 6px;
+}
 .notes-filter.notes-filter {
   width: 100%;
   margin-bottom: 12px;
@@ -3052,4 +3226,156 @@ textarea.paper-note-input {
 .note-quote:has(.annotation-quote-pair) {
   height: auto;
   display: block;
+}
+
+/* zotero chrome: colored icons and alternating list bands. */
+.paper-type-icon {
+  display: none;
+}
+.app[data-chrome="zotero"] .paper-type-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  color: #d6453d;
+}
+.app[data-chrome="zotero"] .paper-type-icon[data-type="epub"] {
+  color: #2f9e6b;
+}
+.app[data-chrome="zotero"] .paper-type-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="library"] > svg,
+.app[data-chrome="zotero"] .nav-item[data-tone="reading"] > svg,
+.app[data-chrome="zotero"] .nav-item[data-tone="about"] > svg {
+  color: #3b6fd8;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="folder"] > svg,
+.app[data-chrome="zotero"] .paper-nav-edit[data-tone="folder"] > svg {
+  color: #e2a317;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="pdf"] > svg,
+.app[data-chrome="zotero"] .trash-row > svg[data-type="pdf"] {
+  color: #d6453d;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="epub"] > svg,
+.app[data-chrome="zotero"] .trash-row > svg[data-type="epub"] {
+  color: #2f9e6b;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="star"] > svg {
+  color: #d4920a;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="tags"] > svg,
+.app[data-chrome="zotero"] .nav-item[data-tone="done"] > svg {
+  color: #1f9d6a;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="trash"] > svg {
+  color: #c4544a;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="duplicate"] > svg {
+  color: #e07a2f;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="help"] > svg {
+  color: #7c5cbf;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="guide"] > svg {
+  color: #0f8f8a;
+}
+.app[data-chrome="zotero"] .nav-item[data-tone="unread"] > svg,
+.app[data-chrome="zotero"] .nav-item[data-tone="inbox"] > svg,
+.app[data-chrome="zotero"] .nav-item[data-tone="settings"] > svg {
+  color: #64748b;
+}
+.app[data-chrome="zotero"] .paper-list {
+  gap: 0;
+}
+.app[data-chrome="zotero"] .paper-list-pane {
+  padding: 0 0 24px;
+}
+.app[data-chrome="zotero"] .paper-batch-bar {
+  top: 0;
+  margin: 0;
+  padding-inline: 16px;
+}
+.app[data-chrome="zotero"] :is(.paper-row, .paper-table-row) {
+  border-radius: 0;
+}
+.app[data-chrome="zotero"] .paper-row {
+  min-height: 36px;
+  padding-inline: 16px;
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row, .trash-row)[data-band="shallow"]:not(
+    [data-selected],
+    [data-picked]
+  ) {
+  background: var(--background);
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row, .trash-row)[data-band="deep"]:not(
+    [data-selected],
+    [data-picked]
+  ) {
+  background: color-mix(in oklch, var(--foreground) 6%, var(--background));
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row)[data-band="shallow"]:hover:not(
+    [data-selected],
+    [data-picked]
+  ) {
+  background: color-mix(in oklch, var(--foreground) 4%, var(--background));
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row)[data-band="deep"]:hover:not(
+    [data-selected],
+    [data-picked]
+  ) {
+  background: color-mix(in oklch, var(--foreground) 10%, var(--background));
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row):is([data-selected], [data-picked]) {
+  background: #1d6feb;
+  color: #fff;
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row):is([data-selected], [data-picked])
+  :is(
+    td,
+    .paper-row-title,
+    .paper-row-byline,
+    .paper-row-meta,
+    .paper-row-status
+  ) {
+  color: #fff;
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row):is([data-selected], [data-picked])
+  .paper-row-status {
+  background: rgb(255 255 255 / 18%);
+}
+.app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row):is([data-selected], [data-picked])
+  .paper-row-more {
+  color: #fff;
+}
+.app[data-chrome="zotero"]
+  .book-list
+  .book-card[data-band="deep"]:not([data-selected="true"]) {
+  background: color-mix(in oklch, var(--foreground) 6%, var(--background));
+  border-radius: 10px;
+}
+.app[data-chrome="zotero"] .book-list .book-card[data-band="shallow"] {
+  border-radius: 10px;
+}
+.dark
+  .app[data-chrome="zotero"]
+  :is(.paper-row, .paper-table-row, .trash-row)[data-band="deep"]:not(
+    [data-selected],
+    [data-picked]
+  ),
+.dark
+  .app[data-chrome="zotero"]
+  .book-list
+  .book-card[data-band="deep"]:not([data-selected="true"]) {
+  background: color-mix(in oklch, var(--foreground) 8%, var(--background));
 }

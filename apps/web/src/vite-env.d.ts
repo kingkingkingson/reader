@@ -6,7 +6,7 @@ interface Window {
     checkForUpdates: () => Promise<void>;
     writeClipboardText: (text: string) => Promise<void>;
     setAppearance: (
-      appearance: "light" | "sepia" | "dark" | "system",
+      appearance: "light" | "sepia" | "cream" | "dark" | "system",
     ) => Promise<void>;
     /** Resolves with long papers that need the reader's confirmation. */
     chooseZoteroDirectory?: () => Promise<string | null>;

@@ -165,6 +165,8 @@ export class PDFReaderAdapter implements ReaderAdapter {
     this.links.setDocument(this.pdf);
     await initialized;
     if (this.disposed) return;
+    this.fitWidth = true;
+    this.appliedZoom = "width";
     this.viewer.currentScaleValue = "page-width";
     if (doc.progress?.type === "pdf") await this.goTo(doc.progress);
     else this.events.location(this.location, 1 / this.pdf.numPages);
@@ -332,6 +334,10 @@ export class PDFReaderAdapter implements ReaderAdapter {
     if (!command || event.defaultPrevented || !this.canZoom(event.target))
       return;
     event.preventDefault();
+    this.adjustZoom(command);
+  };
+  adjustZoom(command: "in" | "out" | "width") {
+    if (!this.pdf || this.disposed || !this.container.isConnected) return;
     this.wheelScale = undefined;
     if (command === "width") {
       this.navigation.stop();
@@ -343,7 +349,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
       return;
     }
     this.zoomTo(this.viewer.currentScale * (command === "in" ? 1.1 : 1 / 1.1));
-  };
+  }
   private canZoom(target: EventTarget | null) {
     if (
       !this.pdf ||

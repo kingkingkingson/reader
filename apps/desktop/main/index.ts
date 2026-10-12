@@ -132,6 +132,7 @@ async function startServer() {
 /** Window background before the renderer paints, matching the theme. */
 function windowBackground(appearance: unknown) {
   if (appearance === "sepia") return "#eeede7";
+  if (appearance === "cream") return "#eeede7";
   return nativeTheme.shouldUseDarkColors ? "#171717" : "#ffffff";
 }
 // Long papers wait for the reader's choice. The renderer refers to them by
@@ -254,7 +255,7 @@ app
     nativeTheme.themeSource =
       appearance === "light" || appearance === "dark"
         ? appearance
-        : appearance === "sepia"
+        : appearance === "sepia" || appearance === "cream"
           ? "light"
           : "system";
     window = new BrowserWindow({
@@ -266,7 +267,7 @@ app
       ...(process.platform === "darwin"
         ? {
             titleBarStyle: "hidden" as const,
-            trafficLightPosition: { x: 20, y: 20 },
+            trafficLightPosition: { x: 20, y: 13 },
           }
         : {}),
       backgroundColor: windowBackground(appearance),
@@ -361,12 +362,14 @@ app
       if (
         appearance !== "light" &&
         appearance !== "sepia" &&
+        appearance !== "cream" &&
         appearance !== "dark" &&
         appearance !== "system"
       )
         throw new Error("Invalid appearance");
-      // Paper is a light theme for native chrome with its own background.
-      nativeTheme.themeSource = appearance === "sepia" ? "light" : appearance;
+      // Paper and cream are light themes for native chrome.
+      nativeTheme.themeSource =
+        appearance === "sepia" || appearance === "cream" ? "light" : appearance;
       window.setBackgroundColor(windowBackground(appearance));
     });
     ipcMain.handle(

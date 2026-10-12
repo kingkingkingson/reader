@@ -254,11 +254,15 @@ export interface ReaderAnnotationTarget {
   ids: string[];
   anchor: SelectionAnchor;
 }
-export type Appearance = "light" | "sepia" | "dark" | "system";
+export type Appearance = "light" | "sepia" | "cream" | "dark" | "system";
+/** Library chrome. Unset uses the colored zotero style. */
+export type LibraryChrome = "plain" | "zotero";
 export interface ReaderTheme {
   autoTranslatePDF?: boolean;
   appearance?: Appearance;
-  mode: "light" | "sepia" | "dark";
+  /** "zotero" colors icons and stripes list rows; "plain" keeps the flat gray chrome. */
+  chrome?: LibraryChrome;
+  mode: "light" | "sepia" | "cream" | "dark";
   fontSize: number;
   fontFamily: string;
   lineHeight: number;
@@ -270,6 +274,8 @@ export interface ReaderTheme {
   /** "sans-serif", "serif" or an installed font family name. */
   translationFontFamily?: string;
   linkTranslationAnnotations?: boolean;
+  /** Reader-authored terminology notes injected into translation prompts. */
+  translationGlossary?: string;
   translationFontWeight?: "normal" | "bold";
   /** The highlight palette, in order; the defaults apply when unset. */
   highlightColors?: HighlightColor[];
@@ -350,6 +356,8 @@ export interface ReaderAdapter {
   clearSelection(): void;
   highlight(annotations: Annotation[]): Promise<void>;
   setTheme(theme: ReaderTheme): Promise<void>;
+  /** Step the PDF scale, or fit the page to the reading pane width. */
+  adjustZoom?(command: "in" | "out" | "width"): void;
   /** Layout choices that must apply before the first page is shown. */
   preferTheme?(theme: ReaderTheme): void;
   getContext(): Promise<string>;

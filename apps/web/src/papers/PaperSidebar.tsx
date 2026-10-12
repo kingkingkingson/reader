@@ -110,6 +110,17 @@ const viewIcons: Record<BuiltinView, typeof Library> = {
   unfiled: Inbox,
   duplicates: Copy,
 };
+const viewTones: Record<BuiltinView, string> = {
+  all: "library",
+  reading: "reading",
+  unread: "unread",
+  done: "done",
+  starred: "star",
+  processing: "reading",
+  questions: "help",
+  unfiled: "inbox",
+  duplicates: "duplicate",
+};
 
 /** True while ⌥ is held, to show the categories of the selected paper. */
 function useAltKey() {
@@ -150,6 +161,7 @@ function SidebarRow({
   title,
   highlighted,
   color,
+  tone,
 }: {
   icon: typeof Library;
   label: string;
@@ -162,12 +174,14 @@ function SidebarRow({
   title?: string;
   highlighted?: boolean;
   color?: string;
+  tone?: string;
 }) {
   const [over, setOver] = useState(false);
   const row = (
     <Button
       variant="ghost"
       className={`nav-item paper-nav-item ${active ? "active" : ""}`}
+      data-tone={tone}
       data-drop-over={over || undefined}
       data-highlighted={highlighted || undefined}
       title={title || label}
@@ -284,6 +298,7 @@ export function PaperSidebar({
     <SidebarRow
       key={`view:${v}`}
       icon={viewIcons[v]}
+      tone={viewTones[v]}
       label={viewLabels[v]}
       count={count(v)}
       active={view === v}
@@ -343,6 +358,7 @@ export function PaperSidebar({
         <form
           key={key}
           className="paper-nav-edit"
+          data-tone="folder"
           style={indent}
           onSubmit={(e) => {
             e.preventDefault();
@@ -383,6 +399,7 @@ export function PaperSidebar({
       <SidebarRow
         key={key}
         icon={hasChildren && expanded && !isPinned ? FolderOpen : Folder}
+        tone="folder"
         label={isPinned ? categoryLeaf(name) : node.label}
         title={name.replaceAll("/", " / ")}
         count={count(key)}
@@ -536,7 +553,8 @@ export function PaperSidebar({
   const paperRow = (doc: Document, isPinned = false) => (
     <SidebarRow
       key={`doc:${doc.id}`}
-      icon={FileText}
+      icon={doc.type === "epub" ? BookOpen : FileText}
+      tone={doc.type === "epub" ? "epub" : "pdf"}
       label={shortTitle(doc)}
       title={doc.title}
       pinned={isPinned}
@@ -568,6 +586,7 @@ export function PaperSidebar({
       <SidebarRow
         key={key}
         icon={Tags}
+        tone="tags"
         label={item.name}
         title={`${item.name}：含 ${item.tags.map((t) => `#${t}`).join(" ")}`}
         count={count(key)}
@@ -732,6 +751,7 @@ export function PaperSidebar({
             <Button
               variant="ghost"
               className="nav-item paper-nav-item text-muted-foreground"
+              data-tone="folder"
               onClick={onNewCategory}
             >
               <Plus className="size-4" />
@@ -790,6 +810,7 @@ export function PaperSidebar({
         <nav>
           <SidebarRow
             icon={Trash2}
+            tone="trash"
             label="回收站"
             count={trashCount}
             active={view === "trash"}

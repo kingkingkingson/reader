@@ -120,6 +120,18 @@ const button = (label: string) =>
     (b) => b.textContent?.trim() === label,
   )!;
 
+it("bands neighboring papers and colors sidebar icons by kind", () => {
+  expect(row("Attention Is All You Need").dataset.band).toBe("shallow");
+  expect(row("Graph Attention Networks").dataset.band).toBe("deep");
+  expect(
+    row("Attention Is All You Need")
+      .querySelector(".paper-type-icon")
+      ?.getAttribute("data-type"),
+  ).toBe("pdf");
+  expect(navButton("全部论文").dataset.tone).toBe("library");
+  expect(navButton("ML").dataset.tone).toBe("folder");
+});
+
 it("shows details on click and saves an edited field as manual metadata", async () => {
   await act(async () => row("Attention Is All You Need").click());
   const detail = host.querySelector(".paper-detail")!;

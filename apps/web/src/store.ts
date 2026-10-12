@@ -11,6 +11,8 @@ import {
 import { api } from "@reader/api";
 export const useReaderStore = create<{
   documents: Document[];
+  /** Papers opened in the reader, in tab order. */
+  tabs: Document[];
   active: Document | null;
   theme: ReaderTheme;
   aiConfig?: AIConfig;
@@ -25,10 +27,13 @@ export const useReaderStore = create<{
   setAIConfig: (config: AIConfig) => void;
   setAIModelSaving: (saving: boolean) => void;
   setDocuments: (documents: Document[]) => void;
+  /** Open a paper in a tab, or return to the library when `active` is null. */
   open: (active: Document | null) => void;
+  closeTab: (id: string) => void;
   setTheme: (patch: Partial<ReaderTheme>) => void;
 }>((set) => ({
   documents: [],
+  tabs: [],
   active: null,
   theme: defaultTheme,
   aiModelSaving: false,
@@ -40,17 +45,48 @@ export const useReaderStore = create<{
   setLibraryPreferences: (libraryPreferences) => set({ libraryPreferences }),
   setAIConfig: (aiConfig) => set({ aiConfig }),
   setAIModelSaving: (aiModelSaving) => set({ aiModelSaving }),
-  setDocuments: (documents) => set({ documents }),
-  open: (active) => set({ active }),
+  setDocuments: (documents) =>
+    set((state) => ({
+      documents,
+      tabs: state.tabs.map(
+        (tab) => documents.find((doc) => doc.id === tab.id) ?? tab,
+      ),
+    })),
+  open: (active) =>
+    set((state) => {
+      if (!active) return { active: null };
+      const exists = state.tabs.some((tab) => tab.id === active.id);
+      return {
+        active,
+        tabs: exists
+          ? state.tabs.map((tab) => (tab.id === active.id ? active : tab))
+          : [...state.tabs, active],
+      };
+    }),
+  closeTab: (id) =>
+    set((state) => {
+      const index = state.tabs.findIndex((tab) => tab.id === id);
+      if (index < 0) return {};
+      const tabs = state.tabs.filter((tab) => tab.id !== id);
+      if (state.active?.id !== id) return { tabs };
+      return { tabs, active: tabs[index] ?? tabs[index - 1] ?? null };
+    }),
   setTheme: (patch) =>
     set((state) => ({ theme: { ...state.theme, ...patch } })),
 }));
 let libraryRevision = 0;
 export function forgetLibraryDocuments(ids: string[]) {
   ++libraryRevision;
-  const state = useReaderStore.getState();
-  state.setDocuments(state.documents.filter((d) => !ids.includes(d.id)));
-  if (state.active && ids.includes(state.active.id)) state.open(null);
+  const removed = new Set(ids);
+  useReaderStore.setState((state) => {
+    const tabs = state.tabs.filter((tab) => !removed.has(tab.id));
+    const activeGone = !!state.active && removed.has(state.active.id);
+    return {
+      documents: state.documents.filter((doc) => !removed.has(doc.id)),
+      tabs,
+      active: activeGone ? (tabs[0] ?? null) : state.active,
+    };
+  });
 }
 export async function refreshLibrary() {
   const revision = ++libraryRevision;

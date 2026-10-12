@@ -46,6 +46,21 @@ describe("Markdown received source vs display", () => {
     ).not.toBeNull();
     dom.window.close();
   });
+  it("shows only a note's own images", () => {
+    const remote = `![](https://example.com/a.png)\n\n![](note-image:${"a".repeat(32)}.png)`;
+    expect(render(remote)).not.toContain("<img");
+    const note = renderToStaticMarkup(
+      <MessageMarkdown
+        content={remote}
+        animated={false}
+        images
+        documentId="paper-1"
+      />,
+    );
+    expect(note).not.toContain("example.com");
+    expect(note).not.toContain("<img");
+    expect(note).toContain("图片加载中");
+  });
   it.each([
     "javascript:alert(1)",
     "data:text/html,x",

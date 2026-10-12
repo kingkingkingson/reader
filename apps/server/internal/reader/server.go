@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"reader.local/server/internal/scholar"
 )
@@ -99,6 +100,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/documents/resolve", s.resolveDocument)
 	mux.HandleFunc("GET /api/documents/{id}/note", s.documentNote)
 	mux.HandleFunc("PUT /api/documents/{id}/note", s.saveDocumentNote)
+	mux.HandleFunc("POST /api/documents/{id}/note-images", s.saveNoteImage)
+	mux.HandleFunc("GET /api/documents/{id}/note-images/{name}", s.getNoteImage)
 	mux.HandleFunc("POST /api/documents/{id}/metadata/lookup", s.lookupMetadata)
 	mux.HandleFunc("GET /api/processing", s.processingList)
 	mux.HandleFunc("POST /api/documents/{id}/processing", s.retryProcessing)
@@ -169,6 +172,17 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
+		if value, exists := v["translationGlossary"]; exists {
+			text, ok := value.(string)
+			if !ok {
+				fail(w, 400, "翻译术语说明必须为文本")
+				return
+			}
+			if utf8.RuneCountInString(text) > translationGlossaryLimit {
+				fail(w, 400, "翻译术语说明不能超过 4000 字")
+				return
+			}
+		}
 		b, _ := json.Marshal(v)
 		_, err := s.Store.DB.Exec("INSERT INTO settings VALUES('reader',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", string(b))
 		if err != nil {
@@ -210,6 +224,7 @@ func (s *Server) Handler() http.Handler {
 		mux.ServeHTTP(w, r)
 	})
 }
+
 // webAssets serves the built renderer. Chromium only runs an ES module or a
 // module worker when the response carries a JavaScript MIME type, and host MIME
 // databases map ".mjs" to "text/plain" often enough that Go special-cases ".js"
