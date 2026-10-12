@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 )
 
 type TranslationSentence struct {
@@ -158,11 +159,12 @@ func (s *Server) requestTranslation(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		BlockID string `json:"blockId"`
+		Force   bool   `json:"force"`
 	}
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.BlockID == "" && (d.Library == "books" || d.Type == "epub") {
+	if req.BlockID == "" && (d.Library == "books" || d.Type == "epub") && !req.Force {
 		fail(w, 400, "图书请按章节翻译")
 		return
 	}
@@ -174,7 +176,7 @@ func (s *Server) requestTranslation(w http.ResponseWriter, r *http.Request) {
 	s.processingMu.Lock()
 	defer s.processingMu.Unlock()
 	p, err := s.Store.processing(d.ID)
-	if err != nil || !p.Enabled {
+	if err != nil || (!p.Enabled && !req.Force) || (req.Force && !p.Enabled && p.Translating == nil) {
 		fail(w, 409, "请先开始翻译")
 		return
 	}
@@ -189,11 +191,15 @@ func (s *Server) requestTranslation(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		found = true
-		if t.Status == "complete" || t.Status == "running" {
+		if !req.Force && (t.Status == "complete" || t.Status == "running") {
 			continue
 		}
 		t.Status = "pending"
 		t.Error = ""
+		if req.Force {
+			t.Sentences = []TranslationSentence{}
+			t.FormulaMarkdown = ""
+		}
 		if err = s.saveTranslation(d.ID, t); err != nil {
 			fail(w, 500, "无法保存翻译任务")
 			return
@@ -203,19 +209,74 @@ func (s *Server) requestTranslation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "没有可翻译的段落")
 		return
 	}
-	if p.Status != "running" || (p.Translating != nil && p.Translating.Status != "running") {
+	if p.Status != "running" || (p.Translating != nil && p.Translating.Status != "running") || req.Force {
 		if p.Phase == "ready" {
 			p.Phase = "translating"
 		}
 		p.Status = "queued"
 		p.Detail = "等待继续处理"
 		p.queueTranslation = true
+		if req.Force {
+			p.enable = true
+		}
 		if err = s.Store.saveProcessing(p); err != nil {
 			fail(w, 500, "无法安排翻译任务")
 			return
 		}
 	}
 	respond(w, 202, map[string]bool{"queued": true})
+}
+
+func (s *Server) updateTranslation(w http.ResponseWriter, r *http.Request) {
+	d, err := s.Store.Document(r.PathValue("id"))
+	if err != nil || (d.Type != "pdf" && d.Type != "epub") {
+		fail(w, 404, "文档不存在")
+		return
+	}
+	var req struct {
+		Index  int    `json:"index"`
+		Target string `json:"target"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		fail(w, 400, "译文不能为空")
+		return
+	}
+	if utf8.RuneCountInString(target) > 20000 {
+		fail(w, 400, "译文过长")
+		return
+	}
+	m, err := s.readTranslationSource(d.ID)
+	if err != nil {
+		fail(w, 409, "正文仍在解析中")
+		return
+	}
+	items, err := s.translations(d.ID, m)
+	if err != nil {
+		fail(w, 500, "无法读取译文")
+		return
+	}
+	blockID := r.PathValue("blockId")
+	for _, t := range items {
+		if t.BlockID != blockID {
+			continue
+		}
+		if t.Status != "complete" || req.Index < 0 || req.Index >= len(t.Sentences) {
+			fail(w, 400, "这一句译文不能修改")
+			return
+		}
+		t.Sentences[req.Index].Target = target
+		if err = s.saveTranslation(d.ID, t); err != nil {
+			fail(w, 500, "无法保存译文")
+			return
+		}
+		respond(w, 200, t)
+		return
+	}
+	fail(w, 404, "没有这一段译文")
 }
 
 func parseTranslation(raw, source string) ([]TranslationSentence, error) {

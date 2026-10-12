@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { Pause, RotateCcw, Sparkles } from "lucide-react";
 import type { EPUBLocation, LibraryMode, Processing } from "@reader/core";
 import { api } from "@reader/api";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@reader/ui/components/alert-dialog";
 import { Button } from "@reader/ui/components/button";
 import { toast } from "sonner";
 import type { PageRange } from "./chapters";
@@ -28,6 +38,7 @@ export function AssistanceControls({
 }) {
   const [saved, setSaved] = useState<Processing>();
   const [busy, setBusy] = useState(false);
+  const [confirmAll, setConfirmAll] = useState(false);
   const serial = useRef(0);
   const job =
     saved &&
@@ -128,6 +139,58 @@ export function AssistanceControls({
         )}
         {label}
       </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={
+          busy || !job || (!job.enabled && !job.translating && !job.startedAt)
+        }
+        onClick={() => setConfirmAll(true)}
+      >
+        重新翻译全文
+      </Button>
+      <AlertDialog
+        open={confirmAll}
+        onOpenChange={(open) => {
+          if (!busy) setConfirmAll(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重新翻译全文？</AlertDialogTitle>
+            <AlertDialogDescription>
+              现有译文会被清除，并按当前模型和术语重新翻译。手动改过的段落也会被覆盖。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy}
+              onClick={() => {
+                const operation = ++serial.current;
+                setBusy(true);
+                void api
+                  .translate(documentId, "", true)
+                  .then(() => api.assistance(documentId))
+                  .then((next) => {
+                    if (operation === serial.current) {
+                      setSaved(next);
+                      setConfirmAll(false);
+                    }
+                  })
+                  .catch((e: Error) => {
+                    if (operation === serial.current) toast.error(e.message);
+                  })
+                  .finally(() => {
+                    if (operation === serial.current) setBusy(false);
+                  });
+              }}
+            >
+              重新翻译
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

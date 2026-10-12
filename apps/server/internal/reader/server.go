@@ -116,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/documents/{id}/translations", s.documentTranslations)
 	mux.HandleFunc("GET /api/documents/{id}/translations/stream", s.streamTranslations)
 	mux.HandleFunc("POST /api/documents/{id}/translations", s.requestTranslation)
+	mux.HandleFunc("PUT /api/documents/{id}/translations/{blockId}", s.updateTranslation)
 	mux.HandleFunc("PATCH /api/documents/{id}", s.updateDocument)
 	mux.HandleFunc("DELETE /api/documents/{id}", s.deleteDocument)
 	mux.HandleFunc("POST /api/documents/{id}/trash", s.trashDocument)

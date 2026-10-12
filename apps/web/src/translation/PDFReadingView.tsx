@@ -212,9 +212,9 @@ export function PDFReadingView({
       void engine?.focusSentences?.("", []);
     }
   }, [theme.linkTranslationAnnotations, engine]);
-  const translate = async (blockId = "") => {
+  const translate = async (blockId = "", force = false) => {
     try {
-      await api.translate(doc.id, blockId);
+      await api.translate(doc.id, blockId, force);
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -1122,6 +1122,15 @@ export function PDFReadingView({
                         documentId={doc.id}
                         renderImage={blockImages?.url}
                         retry={() => void translate(block.id)}
+                        retranslate={() => void translate(block.id, true)}
+                        onSave={async (index, target) => {
+                          await api.saveTranslationSentence(
+                            doc.id,
+                            block.id,
+                            index,
+                            target,
+                          );
+                        }}
                         paused={processing?.enabled === false}
                         linked={linked?.[block.id] ?? []}
                       />
@@ -1165,6 +1174,15 @@ export function PDFReadingView({
                   documentId={doc.id}
                   renderImage={blockImages?.url}
                   retry={() => void translate(popup.block.id)}
+                  retranslate={() => void translate(popup.block.id, true)}
+                  onSave={async (index, target) => {
+                    await api.saveTranslationSentence(
+                      doc.id,
+                      popup.block.id,
+                      index,
+                      target,
+                    );
+                  }}
                   paused={processing?.enabled === false}
                 />
                 <Button

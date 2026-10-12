@@ -225,3 +225,71 @@ func TestTranslationStageWaitsForTextCapabilityAndResumes(t *testing.T) {
 		t.Fatalf("configuration wake lost translation stage: %+v, %v", saved, err)
 	}
 }
+
+func completeTranslation(b PDFBlock, sentences []TranslationSentence) TranslationBlock {
+	return TranslationBlock{BlockID: b.ID, SourceHash: translationHash(translationSource(b)), Status: "complete", Sentences: sentences}
+}
+
+func TestForceRetranslateResetsCompletedBlock(t *testing.T) {
+	s, _, m := translationFixture(t)
+	first := completeTranslation(m.Blocks[0], []TranslationSentence{{Source: "First sentence.", Target: "第一句。"}, {Source: "Second sentence.", Target: "第二句。"}})
+	second := completeTranslation(m.Blocks[1], []TranslationSentence{{Source: "Another paragraph.", Target: "另一段。"}})
+	if err := s.saveTranslation("doc", first); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveTranslation("doc", second); err != nil {
+		t.Fatal(err)
+	}
+	kept := request(t, s, "POST", "/api/documents/doc/translations", strings.NewReader(`{"blockId":"`+m.Blocks[0].ID+`"}`))
+	if kept.Code != 202 {
+		t.Fatal(kept.Body.String())
+	}
+	items, err := s.translations("doc", m)
+	if err != nil || items[0].Status != "complete" || items[0].Sentences[0].Target != "第一句。" || items[1].Status != "complete" {
+		t.Fatalf("completed block changed without force: %+v %v", items, err)
+	}
+	forced := request(t, s, "POST", "/api/documents/doc/translations", strings.NewReader(`{"blockId":"`+m.Blocks[0].ID+`","force":true}`))
+	if forced.Code != 202 {
+		t.Fatal(forced.Body.String())
+	}
+	items, err = s.translations("doc", m)
+	if err != nil || items[0].Status != "pending" || len(items[0].Sentences) != 0 || items[1].Status != "complete" || items[1].Sentences[0].Target != "另一段。" {
+		t.Fatalf("force reset the wrong blocks: %+v %v", items, err)
+	}
+	if pause := request(t, s, "POST", "/api/documents/doc/assistance", strings.NewReader(`{"action":"pause"}`)); pause.Code != 200 {
+		t.Fatal(pause.Body.String())
+	}
+	again := request(t, s, "POST", "/api/documents/doc/translations", strings.NewReader(`{"force":true}`))
+	if again.Code != 202 {
+		t.Fatal(again.Body.String())
+	}
+	items, err = s.translations("doc", m)
+	p, perr := s.Store.processing("doc")
+	if err != nil || perr != nil || !p.Enabled || p.Status != "queued" || items[0].Status != "pending" || len(items[0].Sentences) != 0 || items[1].Status != "pending" || len(items[1].Sentences) != 0 {
+		t.Fatalf("full retranslate did not clear and queue: %+v %+v %v %v", items, p, err, perr)
+	}
+}
+
+func TestEditTranslationSentence(t *testing.T) {
+	s, _, m := translationFixture(t)
+	block := m.Blocks[0]
+	saved := completeTranslation(block, []TranslationSentence{{Source: "First sentence.", Target: "第一句。"}, {Source: "Second sentence.", Target: "第二句。"}})
+	if err := s.saveTranslation("doc", saved); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/documents/doc/translations/" + block.ID
+	updated := request(t, s, "PUT", path, strings.NewReader(`{"index":1,"target":"改过的第二句。"}`))
+	if updated.Code != 200 {
+		t.Fatal(updated.Body.String())
+	}
+	var got TranslationBlock
+	if json.Unmarshal(updated.Body.Bytes(), &got) != nil || got.Sentences[0].Target != "第一句。" || got.Sentences[1].Target != "改过的第二句。" || got.Sentences[1].Source != "Second sentence." || got.Status != "complete" {
+		t.Fatalf("edited sentence not saved: %s", updated.Body.String())
+	}
+	if empty := request(t, s, "PUT", path, strings.NewReader(`{"index":1,"target":"  "}`)); empty.Code != 400 {
+		t.Fatalf("empty target accepted: %d %s", empty.Code, empty.Body.String())
+	}
+	if bad := request(t, s, "PUT", path, strings.NewReader(`{"index":4,"target":"不行"}`)); bad.Code != 400 {
+		t.Fatalf("bad index accepted: %d %s", bad.Code, bad.Body.String())
+	}
+}

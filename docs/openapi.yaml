@@ -1910,7 +1910,15 @@
                           "schema":
                             {
                               "type": "object",
-                              "properties": { "blockId": { "type": "string" } },
+                              "properties":
+                                {
+                                  "blockId": { "type": "string" },
+                                  "force":
+                                    {
+                                      "type": "boolean",
+                                      "description": "Replace completed translations. Omit or false to keep them. An empty blockId with force retranslates every paragraph.",
+                                    },
+                                },
                             },
                         },
                     },
@@ -1919,7 +1927,7 @@
                 {
                   "202":
                     {
-                      "description": "Translation queued; completed blocks are retained",
+                      "description": "Translation queued. Completed blocks stay unless force is true.",
                       "content":
                         {
                           "application/json":
@@ -1931,6 +1939,75 @@
                                   "properties":
                                     { "queued": { "type": "boolean" } },
                                 },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/translations/{blockId}":
+        {
+          "put":
+            {
+              "description": "Replace one completed sentence with the reader's edited translation. The source sentence stays unchanged.",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "blockId",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "required": ["index", "target"],
+                              "properties":
+                                {
+                                  "index": { "type": "integer" },
+                                  "target": { "type": "string" },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Updated translation",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/TranslationBlock" },
                             },
                         },
                     },

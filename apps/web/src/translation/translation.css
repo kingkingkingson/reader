@@ -375,3 +375,29 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.translation-block-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+[data-translation-block] .translation-block-actions {
+  display: none;
+}
+[data-translation-block]:hover .translation-block-actions,
+[data-translation-block][data-focused] .translation-block-actions,
+[data-translation-block]:focus-within .translation-block-actions {
+  display: flex;
+}
+.translation-edit {
+  display: block;
+  width: 100%;
+  margin: 0.25em 0;
+  padding: 0.35em 0.5em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  resize: vertical;
+  min-height: 4.5em;
+}

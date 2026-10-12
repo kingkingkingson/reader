@@ -1647,11 +1647,13 @@ export interface paths {
                 content: {
                     "application/json": {
                         blockId?: string;
+                        /** @description Replace completed translations. Omit or false to keep them. An empty blockId with force retranslates every paragraph. */
+                        force?: boolean;
                     };
                 };
             };
             responses: {
-                /** @description Translation queued; completed blocks are retained */
+                /** @description Translation queued. Completed blocks stay unless force is true. */
                 202: {
                     headers: {
                         [name: string]: unknown;
@@ -1673,6 +1675,61 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/translations/{blockId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Replace one completed sentence with the reader's edited translation. The source sentence stays unchanged. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    blockId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        index: number;
+                        target: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated translation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TranslationBlock"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;

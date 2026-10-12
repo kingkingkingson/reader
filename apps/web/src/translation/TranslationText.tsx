@@ -3,6 +3,7 @@ import type { PDFBlock, TranslationBlock } from "@reader/core";
 import { blockImageURL } from "@reader/api";
 import { Button } from "@reader/ui/components/button";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { ReadingLinkNavigation } from "../reading-links";
 import { ErrorBoundary } from "../ErrorBoundary";
 const FormulaFragment = lazy(() => import("./FormulaFragment"));
@@ -101,6 +102,8 @@ function TranslationContent({
   translation,
   documentId,
   retry,
+  retranslate,
+  onSave,
   paused = false,
   linked = [],
   formulaNumber,
@@ -115,6 +118,10 @@ function TranslationContent({
   documentId: string;
   /** Requests this block; also used for blocks that were never requested. */
   retry: () => void;
+  /** Replaces a completed translation of this block. */
+  retranslate?: () => void;
+  /** Persists one edited sentence. */
+  onSave?: (index: number, target: string) => Promise<void>;
   paused?: boolean;
   linked?: number[];
   formulaNumber?: string;
@@ -124,6 +131,7 @@ function TranslationContent({
   /** Replaces the low-resolution layout crop with a render sized for display. */
   renderImage?: (blockId: string, width: number) => Promise<string>;
 }) {
+  const [draft, setDraft] = useState<{ index: number; value: string }>();
   const formula = ["display_formula", "inline_formula"].includes(block.label);
   const idle = translation?.status === "idle";
   const halted = paused && translation?.status === "pending";
@@ -142,13 +150,30 @@ function TranslationContent({
     />
   ) : null;
   const formulaFallback = image || <MessageMarkdown content={block.text} />;
+  const retranslateButton = retranslate ? (
+    <div className="translation-block-actions">
+      <Button
+        className="translation-retranslate"
+        variant="ghost"
+        size="sm"
+        onClick={(event) => {
+          event.stopPropagation();
+          retranslate();
+        }}
+      >
+        重新翻译
+      </Button>
+    </div>
+  ) : null;
   if (
     formula &&
     translation?.status === "complete" &&
     translation.formulaMarkdown
   ) {
     return (
-      <Suspense
+      <>
+        {retranslateButton}
+        <Suspense
         fallback={
           <FormulaRow number={formulaNumber}>{formulaFallback}</FormulaRow>
         }
@@ -159,6 +184,7 @@ function TranslationContent({
           number={formulaNumber}
         />
       </Suspense>
+      </>
     );
   }
   if (formula)
@@ -215,22 +241,72 @@ function TranslationContent({
           />
         ))
       ) : translation?.status === "complete" ? (
-        <div className="translation-sentences">
-          {translation.sentences.map((sentence, i) => (
-            <div
-              key={i}
-              className="translation-sentence"
-              data-sentence={i}
-              data-linked={linked.includes(i) || undefined}
-            >
-              <MessageMarkdown
-                content={sentence.target}
-                blockId={block.id}
-                onCitation={onCitation}
-              />
-            </div>
-          ))}
-        </div>
+        <>
+          {retranslateButton}
+          <div className="translation-sentences">
+            {translation.sentences.map((sentence, i) =>
+              draft?.index === i ? (
+                <textarea
+                  key={i}
+                  className="translation-edit"
+                  aria-label="编辑译文"
+                  value={draft.value}
+                  autoFocus
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    setDraft({ index: i, value: event.target.value })
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setDraft(undefined);
+                    } else if (
+                      event.key === "Enter" &&
+                      (event.metaKey || event.ctrlKey)
+                    ) {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  onBlur={() => {
+                    const target = draft.value.trim();
+                    if (!target) {
+                      toast.error("译文不能为空");
+                      return;
+                    }
+                    if (target === sentence.target.trim()) {
+                      setDraft(undefined);
+                      return;
+                    }
+                    void onSave?.(i, target)
+                      .then(() => setDraft(undefined))
+                      .catch((error: Error) => toast.error(error.message));
+                  }}
+                />
+              ) : (
+                <div
+                  key={i}
+                  className="translation-sentence"
+                  data-sentence={i}
+                  data-linked={linked.includes(i) || undefined}
+                  onDoubleClick={(event) => {
+                    if (!onSave) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setDraft({ index: i, value: sentence.target });
+                  }}
+                >
+                  <MessageMarkdown
+                    content={sentence.target}
+                    blockId={block.id}
+                    onCitation={onCitation}
+                  />
+                </div>
+              ),
+            )}
+          </div>
+        </>
       ) : (
         <div className="translation-pending" role="status">
           <span>

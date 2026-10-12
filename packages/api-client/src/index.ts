@@ -196,11 +196,24 @@ export const api = {
     request<import("@reader/core").TranslationBlock[]>(
       `/api/documents/${id}/translations`,
     ),
-  translate: (id: string, blockId = "") =>
+  translate: (id: string, blockId = "", force = false) =>
     request<{ queued: boolean }>(`/api/documents/${id}/translations`, {
       method: "POST",
-      body: JSON.stringify({ blockId }),
+      body: JSON.stringify({ blockId, force }),
     }),
+  saveTranslationSentence: (
+    id: string,
+    blockId: string,
+    index: number,
+    target: string,
+  ) =>
+    request<import("@reader/core").TranslationBlock>(
+      `/api/documents/${id}/translations/${encodeURIComponent(blockId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ index, target }),
+      },
+    ),
   /** Queues a page range, capped by the server; nextPage is where it stopped. */
   translateRange: (id: string, fromPage: number, toPage: number) =>
     request<{

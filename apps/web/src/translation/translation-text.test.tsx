@@ -42,3 +42,48 @@ it.each([
     host.querySelector(".translation-algorithm pre code")?.textContent,
   ).toBe(`${text}\n`);
 });
+
+it("retranslates a finished paragraph and saves a double-clicked sentence", async () => {
+  const retranslate = vi.fn();
+  const onSave = vi.fn(async () => {});
+  await act(async () =>
+    root.render(
+      <TranslationText
+        block={{ id: "p1-b1", label: "text", text: "First sentence." }}
+        documentId="doc"
+        retry={() => {}}
+        retranslate={retranslate}
+        onSave={onSave}
+        translation={{
+          blockId: "p1-b1",
+          sourceHash: "h",
+          status: "complete",
+          sentences: [{ source: "First sentence.", target: "第一句。" }],
+        }}
+      />,
+    ),
+  );
+  const button = [...host.querySelectorAll("button")].find(
+    (item) => item.textContent === "重新翻译",
+  );
+  expect(button).toBeTruthy();
+  await act(async () => button!.click());
+  expect(retranslate).toHaveBeenCalledOnce();
+  await act(async () =>
+    host
+      .querySelector(".translation-sentence")!
+      .dispatchEvent(new MouseEvent("dblclick", { bubbles: true })),
+  );
+  const editor = host.querySelector("textarea");
+  expect(editor?.getAttribute("aria-label")).toBe("编辑译文");
+  const setValue = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    "value",
+  )!.set!;
+  await act(async () => {
+    setValue.call(editor, "改过。");
+    editor!.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => editor!.blur());
+  expect(onSave).toHaveBeenCalledWith(0, "改过。");
+});

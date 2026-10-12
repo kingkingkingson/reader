@@ -336,8 +336,8 @@ export function EPUBReadingView({
         void engine.current?.goTo(target).catch((e) => toast.error(e.message));
     });
   };
-  const retry = (id = "") => {
-    void api.translate(doc.id, id).catch((e) => toast.error(e.message));
+  const retry = (id = "", force = false) => {
+    void api.translate(doc.id, id, force).catch((e) => toast.error(e.message));
   };
   const toolbar = (
     <div className="translation-toolbar">
@@ -607,6 +607,15 @@ export function EPUBReadingView({
                     )}
                     paused={processing?.enabled === false}
                     retry={() => retry(block.id)}
+                    retranslate={() => retry(block.id, true)}
+                    onSave={async (index, target) => {
+                      await api.saveTranslationSentence(
+                        doc.id,
+                        block.id,
+                        index,
+                        target,
+                      );
+                    }}
                     linked={linked[block.id]}
                   />
                 </section>

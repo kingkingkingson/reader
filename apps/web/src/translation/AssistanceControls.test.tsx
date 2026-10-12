@@ -13,6 +13,7 @@ vi.mock("@reader/api", () => ({
   api: {
     assistance: vi.fn(async () => undefined),
     setAssistance: vi.fn(),
+    translate: vi.fn(async () => ({ queued: true })),
     translateRange: vi.fn(),
     translateEPUBChapter: vi.fn(),
     aiConfig: vi.fn(async () => ({ primary: "codex" })),
