@@ -51,6 +51,10 @@ export const useReaderStore = create<{
       tabs: state.tabs.map(
         (tab) => documents.find((doc) => doc.id === tab.id) ?? tab,
       ),
+      active: state.active
+        ? (documents.find((doc) => doc.id === state.active?.id) ??
+          state.active)
+        : state.active,
     })),
   open: (active) =>
     set((state) => {

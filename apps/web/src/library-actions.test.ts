@@ -44,6 +44,28 @@ it("trashes acknowledged documents once and preserves failed documents for retry
     "c",
   ]);
 });
+it("replaces an open paper's filename when the library reloads", async () => {
+  const filename = {
+    id: "49ec4c7ef73f0becb480e0da6897af4f",
+    title: "fse2027-paper106",
+  } as Document;
+  const printed = {
+    ...filename,
+    title:
+      "CT-Repair: Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs",
+  };
+  useReaderStore.setState({
+    documents: [filename],
+    tabs: [filename],
+    active: filename,
+  });
+  vi.mocked(api.documents).mockResolvedValue([printed]);
+  await refreshLibrary();
+  const state = useReaderStore.getState();
+  expect(state.documents[0]?.title).toBe(printed.title);
+  expect(state.tabs[0]?.title).toBe(printed.title);
+  expect(state.active?.title).toBe(printed.title);
+});
 it("does not resurrect a deleted document from an older poll", async () => {
   let finish!: (docs: Document[]) => void;
   vi.mocked(api.documents).mockReturnValue(

@@ -38,7 +38,7 @@ func (s *Server) applyFound(id string, found PaperMetadata, title, source, looku
 		if err != nil {
 			return d, err
 		}
-		before, _ := json.Marshal(d.Metadata)
+		before := d.metadataRaw
 		m := d.Metadata
 		if m.Sources == nil {
 			m.Sources = map[string]string{}
@@ -65,6 +65,11 @@ func (s *Server) applyFound(id string, found PaperMetadata, title, source, looku
 			return d, err
 		}
 		if n, _ := result.RowsAffected(); n == 1 {
+			// The library poll only reloads when this revision changes. A title
+			// filled in the background would otherwise stay as the filename.
+			if nextTitle != d.Title || author != d.Author {
+				s.connectorRevision.Add(1)
+			}
 			return s.Store.Document(id)
 		}
 	}
@@ -88,9 +93,9 @@ func (s *Server) firstPagesText(id string) (string, layoutManifest) {
 	return b.String(), m
 }
 
-// fileTitle accepts a PDF's own title only when it looks like a real title.
-func fileTitle(m layoutManifest) string {
-	title, _ := m.Metadata["Title"].(string)
+// acceptableTitle rejects filenames, generator names and other strings that are
+// not a paper title.
+func acceptableTitle(title string) string {
 	title = strings.Join(strings.Fields(title), " ")
 	lower := strings.ToLower(title)
 	if len([]rune(title)) < 8 || !strings.Contains(title, " ") {
@@ -102,6 +107,30 @@ func fileTitle(m layoutManifest) string {
 		}
 	}
 	return title
+}
+
+// fileTitle accepts a PDF's own title only when it looks like a real title.
+func fileTitle(m layoutManifest) string {
+	title, _ := m.Metadata["Title"].(string)
+	return acceptableTitle(title)
+}
+
+// layoutTitle prefers the PDF's own title, then the title printed on the first
+// page. Anonymous submissions often leave the document information blank.
+func layoutTitle(m layoutManifest) string {
+	if title := fileTitle(m); title != "" {
+		return title
+	}
+	var parts []string
+	for _, block := range m.Blocks {
+		if block.Page != 1 || block.Label != "doc_title" {
+			continue
+		}
+		if text := strings.Join(strings.Fields(block.Text), " "); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return acceptableTitle(strings.Join(parts, " "))
 }
 
 var errNoIdentifier = errors.New("没有找到 DOI 或 arXiv 编号，可以在详情中填写后重试")
@@ -121,13 +150,14 @@ func (s *Server) lookupDocument(ctx context.Context, id string, byTitle bool) (D
 	if ids.DOI == "" && ids.ArXiv == "" && byTitle {
 		ids.Title = d.Title
 	}
-	if ids == (scholar.Identifiers{}) {
-		// Without an identifier, a sensible title in the PDF is the best we have.
-		if t := fileTitle(layout); t != "" {
-			if _, err := s.applyFound(id, PaperMetadata{}, t, "file", ""); err != nil {
-				return d, err
-			}
+	if t := layoutTitle(layout); t != "" && d.Metadata.Sources["title"] == "" {
+		updated, err := s.applyFound(id, PaperMetadata{}, t, "file", "")
+		if err != nil {
+			return d, err
 		}
+		d = updated
+	}
+	if ids == (scholar.Identifiers{}) {
 		return d, errNoIdentifier
 	}
 	found, err := s.scholarClient().Lookup(ctx, ids)
@@ -248,6 +278,29 @@ func (s *Server) autoLookupEnabled() bool {
 	return *prefs.Papers.AutoLookup
 }
 
+// fillPrintedTitles copies a parsed title onto papers still waiting for lookup,
+// so one slow online lookup cannot leave the rest named after their files.
+func (s *Server) fillPrintedTitles() {
+	rows, err := s.Store.DB.Query(`SELECT id FROM documents WHERE library='papers' AND deleted_at='' AND json_extract(metadata,'$.lookup')='pending' AND COALESCE(json_extract(metadata,'$.sources.title'),'')=''`)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		_, layout := s.firstPagesText(id)
+		if t := layoutTitle(layout); t != "" {
+			_, _ = s.applyFound(id, PaperMetadata{}, t, "file", "")
+		}
+	}
+}
+
 // metadataWorker looks up papers imported from files once their first pages are
 // parsed. It sends only identifiers printed in the paper.
 func (s *Server) metadataWorker(ctx context.Context) {
@@ -262,6 +315,7 @@ func (s *Server) metadataWorker(ctx context.Context) {
 		if !s.autoLookupEnabled() {
 			continue
 		}
+		s.fillPrintedTitles()
 		var id string
 		err := s.Store.DB.QueryRow(`SELECT d.id FROM documents d LEFT JOIN document_processing p ON p.document_id=d.id
    WHERE d.library='papers' AND d.deleted_at='' AND json_extract(d.metadata,'$.lookup')='pending'

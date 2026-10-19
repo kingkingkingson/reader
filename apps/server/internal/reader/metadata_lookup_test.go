@@ -106,6 +106,95 @@ func TestLookupDetectsIdentifierOnFirstPage(t *testing.T) {
 		t.Fatalf("detected lookup: %+v %v", got, err)
 	}
 }
+func TestApplyFoundMatchesStoredMetadataKeyOrder(t *testing.T) {
+	s := testServer(t)
+	w := uploadTo(t, s, "papers", "paper.pdf", testPDF(2))
+	var d Document
+	if json.Unmarshal(w.Body.Bytes(), &d) != nil {
+		t.Fatal(w.Body.String())
+	}
+	stored := `{"lookup":"pending","sources":{"title":"file"}}`
+	if _, err := s.Store.DB.Exec("UPDATE documents SET metadata=? WHERE id=?", stored, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.applyFound(d.ID, PaperMetadata{}, "", "lookup", "notFound")
+	if err != nil || got.Metadata.Lookup != "notFound" || got.Metadata.Sources["title"] != "file" {
+		t.Fatalf("apply: %+v %v", got.Metadata, err)
+	}
+}
+
+func TestLayoutTitleUsesPrintedTitleWhenDocumentInfoIsAFilename(t *testing.T) {
+	printed := "Does Fixing the Crash Fix the Bug? Causal Distance and Symptom Patches"
+	m := layoutManifest{
+		Metadata: map[string]any{"Title": "fse2027-paper5454"},
+		Blocks: []PDFBlock{
+			{Page: 1, Label: "doc_title", Text: printed},
+			{Page: 1, Label: "paragraph_title", Text: "1 Introduction"},
+		},
+	}
+	if got := layoutTitle(m); got != printed {
+		t.Fatalf("printed title: %q", got)
+	}
+	m.Metadata["Title"] = "Canonical Title From The File"
+	if got := layoutTitle(m); got != "Canonical Title From The File" {
+		t.Fatalf("file title: %q", got)
+	}
+}
+
+func TestLookupKeepsPrintedTitleWithoutAnIdentifier(t *testing.T) {
+	s := testServer(t)
+	w := uploadTo(t, s, "papers", "fse2027-paper5454.pdf", testPDF(2))
+	var d Document
+	if json.Unmarshal(w.Body.Bytes(), &d) != nil {
+		t.Fatal(w.Body.String())
+	}
+	dir := s.analysisDir(d.ID)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"pages":1,"metadata":{"Title":"fse2027-paper5454"},"blocks":[{"id":"p1-b1","page":1,"label":"doc_title","bounds":{"x":0.1,"y":0.1,"width":0.8,"height":0.05},"text":"Does Fixing the Crash Fix the Bug? Causal Distance and Symptom Patches"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.lookupDocument(context.Background(), d.ID, false); err != errNoIdentifier {
+		t.Fatal(err)
+	}
+	got, err := s.Store.Document(d.ID)
+	if err != nil || got.Title != "Does Fixing the Crash Fix the Bug? Causal Distance and Symptom Patches" || got.Metadata.Sources["title"] != "file" {
+		t.Fatalf("title: %+v %v", got, err)
+	}
+}
+
+func TestPrintedTitleReplacesFilenameAndNotifiesOpenLibrary(t *testing.T) {
+	s := testServer(t)
+	w := uploadTo(t, s, "papers", "fse2027-paper106.pdf", testPDF(2))
+	var d Document
+	if json.Unmarshal(w.Body.Bytes(), &d) != nil {
+		t.Fatal(w.Body.String())
+	}
+	if d.Title != "fse2027-paper106" {
+		t.Fatalf("import title: %q", d.Title)
+	}
+	dir := s.analysisDir(d.ID)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const printed = "CT-Repair: Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs"
+	manifest := `{"pages":1,"metadata":{"Title":"` + printed + `"},"blocks":[{"id":"p1-b2","page":1,"label":"doc_title","bounds":{"x":0.1,"y":0.11,"width":0.8,"height":0.04},"text":"` + printed + `"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before := s.connectorRevision.Load()
+	s.fillPrintedTitles()
+	got, err := s.Store.Document(d.ID)
+	if err != nil || got.Title != printed || got.Metadata.Sources["title"] != "file" {
+		t.Fatalf("title: %+v %v", got, err)
+	}
+	if s.connectorRevision.Load() == before {
+		t.Fatal("open library would keep showing the filename")
+	}
+}
+
 func TestFileTitleOnlyFillsAPlainTitle(t *testing.T) {
 	for title, want := range map[string]string{
 		"Microsoft Word - paper.docx": "",

@@ -37,6 +37,9 @@ type Document struct {
 	Favorite     bool            `json:"favorite"`
 	Progress     json.RawMessage `json:"progress,omitempty"`
 	Percentage   float64         `json:"percentage"`
+	// metadataRaw is the stored JSON, used so a later update can notice a
+	// concurrent edit. Remarshaling the struct would reorder keys and miss.
+	metadataRaw string
 }
 type Annotation struct {
 	ID         string          `json:"id"`
@@ -155,6 +158,9 @@ func scanDocument(row rowScanner) (Document, error) {
 	}
 	if err == nil {
 		err = json.Unmarshal([]byte(metadata), &d.Metadata)
+	}
+	if err == nil {
+		d.metadataRaw = metadata
 	}
 	if progress != "" {
 		d.Progress = json.RawMessage(progress)

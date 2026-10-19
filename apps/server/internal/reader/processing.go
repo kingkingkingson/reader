@@ -497,6 +497,13 @@ func (s *Server) learnPDF(ctx context.Context, p *Processing) error {
 	if e != nil {
 		return e
 	}
+	if d.Library == "papers" && d.Metadata.Sources["title"] == "" {
+		if t := layoutTitle(m); t != "" {
+			if updated, err := s.applyFound(d.ID, PaperMetadata{}, t, "file", ""); err == nil {
+				d = updated
+			}
+		}
+	}
 	// Publish searchable original passages as part of parsing, before the
 	// translation lane. Index failure must not invalidate a successful parse.
 	if _, indexErr := s.documentCorpus(ctx, d.ID, nil); indexErr != nil {
