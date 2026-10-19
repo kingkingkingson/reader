@@ -266,20 +266,10 @@ export async function startUpdateService(window: BrowserWindow) {
     });
     return active;
   };
-  const initial = setTimeout(() => {
-    void check();
-  }, 15_000);
-  const timer = setInterval(() => {
-    void check();
-  }, 60_000);
-  initial.unref();
-  timer.unref();
   return {
     check: () => check(true),
     stop: () => {
       stopped = true;
-      clearTimeout(initial);
-      clearInterval(timer);
     },
   };
 }

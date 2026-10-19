@@ -102,24 +102,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-it("checks on startup, coalesces manual checks, and does not prompt again within a day", async () => {
+it("does not check on its own and coalesces manual checks", async () => {
   const service = await startUpdateService(window);
   stop = service.stop;
-  await vi.advanceTimersByTimeAsync(15_000);
+  await vi.advanceTimersByTimeAsync(day);
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  expect(mocks.dialog).not.toHaveBeenCalled();
+  await Promise.all([service.check(), service.check()]);
+  expect(mocks.fetch).toHaveBeenCalledTimes(1);
   expect(mocks.dialog).toHaveBeenCalledTimes(1);
   expect(mocks.download).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(day - 60_000);
-  expect(mocks.fetch).toHaveBeenCalledTimes(1);
-  await Promise.all([service.check(), service.check()]);
-  expect(mocks.fetch).toHaveBeenCalledTimes(2);
-  expect(mocks.dialog).toHaveBeenCalledTimes(2);
 });
-it("respects persisted check times and stops scheduled work", async () => {
-  mocks.read.mockResolvedValue(JSON.stringify({ lastChecked: day * 10 }));
+it("does not resume a check from saved state", async () => {
+  mocks.read.mockResolvedValue(JSON.stringify({ lastChecked: 0 }));
   const service = await startUpdateService(window);
   stop = service.stop;
-  await vi.advanceTimersByTimeAsync(15_000);
-  expect(mocks.fetch).not.toHaveBeenCalled();
   service.stop();
   await vi.advanceTimersByTimeAsync(day * 2);
   expect(mocks.fetch).not.toHaveBeenCalled();
@@ -129,7 +126,7 @@ it("opens only verified downloads and reports download failures even after a bac
   mocks.download.mockRejectedValueOnce(new Error("安装包完整性校验失败"));
   const service = await startUpdateService(window);
   stop = service.stop;
-  await vi.advanceTimersByTimeAsync(15_000);
+  await service.check();
   expect(mocks.open).not.toHaveBeenCalled();
   expect(mocks.dialog).toHaveBeenLastCalledWith(
     window,
@@ -158,7 +155,7 @@ it("shows download progress in the taskbar and the app, then clears it", async (
   downloadWithProgress("C:\\test\\Reader-0.2.0-win-x64.exe");
   const service = await startUpdateService(window);
   stop = service.stop;
-  await vi.advanceTimersByTimeAsync(15_000);
+  await service.check();
   expect(window.setProgressBar).toHaveBeenCalledWith(0.25);
   const reports = send.mock.calls
     .filter(([channel]) => channel === "reader:update-progress")
@@ -277,7 +274,7 @@ it("stages a signed Mac update silently and installs it on restart", async () =>
   mocks.dialog.mockResolvedValue({ response: 0 });
   const service = await startUpdateService(window);
   stop = service.stop;
-  await vi.advanceTimersByTimeAsync(15_000);
+  await service.check();
   expect(mocks.inPlace).toHaveBeenCalledWith("/Applications/Reader.app");
   expect(mocks.download).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -298,13 +295,11 @@ it("stages a signed Mac update silently and installs it on restart", async () =>
     force: true,
   });
   // The background check asks nothing before the update is ready.
-  expect(mocks.dialog).toHaveBeenCalledTimes(1);
   expect(mocks.dialog).toHaveBeenCalledWith(
     window,
     expect.objectContaining({ message: "Reader 0.2.0 已准备就绪" }),
   );
-  expect(window.setProgressBar).not.toHaveBeenCalledWith(2);
-  expect(send).not.toHaveBeenCalledWith(
+  expect(send).toHaveBeenCalledWith(
     "reader:update-progress",
     expect.objectContaining({ phase: "download" }),
   );
@@ -343,7 +338,6 @@ it("does not contact GitHub in development mode", async () => {
   mocks.app.isPackaged = false;
   const service = await startUpdateService(window);
   stop = service.stop;
-  await vi.advanceTimersByTimeAsync(15_000);
   await service.check();
   expect(mocks.fetch).not.toHaveBeenCalled();
   expect(mocks.dialog).toHaveBeenCalledWith(
@@ -383,15 +377,17 @@ it.each([0, 1])(
   },
 );
 
-it("keeps a background rate limit failure silent", async () => {
+it("stays quiet when a background check would have been due", async () => {
   mocks.fetch.mockResolvedValue(new Response("", { status: 429 }));
   const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
   try {
     const service = await startUpdateService(window);
     stop = service.stop;
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(day);
+    expect(mocks.fetch).not.toHaveBeenCalled();
     expect(mocks.dialog).not.toHaveBeenCalled();
     expect(mocks.external).not.toHaveBeenCalled();
+    expect(warning).not.toHaveBeenCalled();
   } finally {
     warning.mockRestore();
   }
