@@ -157,6 +157,7 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     document.addEventListener(
       "pointerdown",
       (event) => {
+        if (container.closest("[data-hidden]")) return;
         if (
           !container.contains(event.target as Node) &&
           !isSelectionToolbar(event.target)
@@ -168,6 +169,7 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     document.addEventListener(
       "selectionchange",
       () => {
+        if (container.closest("[data-hidden]")) return;
         if (this.selection && !window.getSelection()?.toString()) {
           this.selection = null;
           this.events.selection(null);

@@ -191,6 +191,88 @@ it("uses repaired text for search and focuses the matching block", async () => {
   expect(adapter.focusBlock).toHaveBeenCalledWith("p1-b1", "parallel");
 });
 
+it("renders section titles at the source heading rank", async () => {
+  const bounds = { x: 0.1, y: 0.1, width: 0.8, height: 0.04 };
+  await renderView(defaultTheme, [
+    { id: "title", page: 1, label: "doc_title", text: "WISE-Fix", bounds },
+    {
+      id: "intro",
+      page: 1,
+      label: "paragraph_title",
+      text: "1 Introduction",
+      bounds,
+    },
+    {
+      id: "sub",
+      page: 1,
+      label: "paragraph_title",
+      text: "1.1 Background",
+      bounds,
+    },
+  ]);
+  await click("原文译文");
+  const heading = (id: string) =>
+    host
+      .querySelector(`[data-translation-block="${id}"]`)
+      ?.getAttribute("data-heading");
+  expect(heading("title")).toBe("1");
+  expect(heading("intro")).toBe("2");
+  expect(heading("sub")).toBe("3");
+  expect(
+    host
+      .querySelector('[data-translation-block="p1-b1"]')
+      ?.hasAttribute("data-heading"),
+  ).toBe(false);
+});
+
+it("groups a prompt template into one callout", async () => {
+  const bounds = { x: 0.5, y: 0.4, width: 0.4, height: 0.05 };
+  await renderView(defaultTheme, [
+    {
+      id: "prompt",
+      page: 1,
+      label: "text",
+      text: "Prompt 1: Weakness-Specific Verifier Synthesis",
+      bounds,
+    },
+    {
+      id: "input",
+      page: 1,
+      label: "text",
+      text: "INPUT: w, labeled training transitions, and schema.",
+      bounds,
+    },
+    {
+      id: "after",
+      page: 1,
+      label: "text",
+      text: "Precondition identifies weakness-relevant elements.",
+      bounds,
+    },
+  ]);
+  await click("原文译文");
+  expect(
+    host
+      .querySelector('[data-translation-block="prompt"]')
+      ?.hasAttribute("data-prompt"),
+  ).toBe(true);
+  expect(
+    host
+      .querySelector('[data-translation-block="input"]')
+      ?.hasAttribute("data-prompt"),
+  ).toBe(true);
+  expect(
+    host
+      .querySelector('[data-translation-block="after"]')
+      ?.hasAttribute("data-prompt"),
+  ).toBe(false);
+  expect(
+    host
+      .querySelector('[data-translation-block="prompt"]')
+      ?.hasAttribute("data-heading"),
+  ).toBe(false);
+});
+
 it("retains PDF.js search on pages without parsed blocks", async () => {
   adapter.getPageCount = () => 2;
   vi.mocked(adapter.search).mockResolvedValueOnce([

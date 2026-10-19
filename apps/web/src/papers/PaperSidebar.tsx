@@ -62,6 +62,7 @@ import { useReaderStore } from "../store";
 import {
   addToCategory,
   deleteCategory,
+  nestCategory,
   renameCategory,
   savePaperPreferences,
   setReadingStatus,
@@ -71,6 +72,7 @@ import { toast } from "sonner";
 import { shortTitle } from "./format";
 import {
   categoryColors,
+  categoryDropPath,
   categoryLeaf,
   categoryParent,
   categoryTree,
@@ -98,6 +100,28 @@ import { exportCitations } from "./CitationMenu";
 
 /** Drag payload for papers moved onto sidebar targets. */
 export const PAPER_DRAG_TYPE = "application/x-reader-papers";
+/** Drag payload for a category being reparented. */
+const CATEGORY_DRAG_TYPE = "application/x-reader-category";
+let draggedCategory = "";
+
+function categoryDrag(e: React.DragEvent, target: string) {
+  if (!e.dataTransfer.types.includes(CATEGORY_DRAG_TYPE)) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  let from = draggedCategory;
+  if (e.type === "drop") {
+    try {
+      from = e.dataTransfer.getData(CATEGORY_DRAG_TYPE) || draggedCategory;
+    } catch {
+      from = draggedCategory;
+    }
+    draggedCategory = "";
+    if (from) void nestCategory(from, target);
+  }
+  const ok = !!categoryDropPath(from, target);
+  if (e.type !== "drop") e.dataTransfer.dropEffect = ok ? "move" : "none";
+  return ok;
+}
 
 const viewIcons: Record<BuiltinView, typeof Library> = {
   all: Library,
@@ -162,6 +186,8 @@ function SidebarRow({
   highlighted,
   color,
   tone,
+  dragCategory,
+  categoryTarget,
 }: {
   icon: typeof Library;
   label: string;
@@ -175,6 +201,9 @@ function SidebarRow({
   highlighted?: boolean;
   color?: string;
   tone?: string;
+  dragCategory?: string;
+  /** Nest a dragged category under this path. */
+  categoryTarget?: string;
 }) {
   const [over, setOver] = useState(false);
   const row = (
@@ -185,23 +214,61 @@ function SidebarRow({
       data-drop-over={over || undefined}
       data-highlighted={highlighted || undefined}
       title={title || label}
+      draggable={dragCategory ? true : undefined}
       onClick={onSelect}
-      onDragOver={
-        onDrop
+      onDragStart={
+        dragCategory
           ? (e) => {
-              if (!e.dataTransfer.types.includes(PAPER_DRAG_TYPE)) return;
+              e.stopPropagation();
+              e.dataTransfer.setData(CATEGORY_DRAG_TYPE, dragCategory);
+              e.dataTransfer.effectAllowed = "move";
+              draggedCategory = dragCategory;
+            }
+          : undefined
+      }
+      onDragEnd={
+        dragCategory
+          ? () => {
+              draggedCategory = "";
+              setOver(false);
+            }
+          : undefined
+      }
+      onDragOver={
+        onDrop || categoryTarget !== undefined
+          ? (e) => {
+              if (
+                categoryTarget !== undefined &&
+                e.dataTransfer.types.includes(CATEGORY_DRAG_TYPE)
+              ) {
+                setOver(categoryDrag(e, categoryTarget));
+                return;
+              }
+              if (!onDrop || !e.dataTransfer.types.includes(PAPER_DRAG_TYPE))
+                return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "copy";
               setOver(true);
             }
           : undefined
       }
-      onDragLeave={() => setOver(false)}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+        setOver(false);
+      }}
       onDrop={
-        onDrop
+        onDrop || categoryTarget !== undefined
           ? (e) => {
-              const ids = droppedIds(e);
               setOver(false);
+              if (
+                categoryTarget !== undefined &&
+                e.dataTransfer.types.includes(CATEGORY_DRAG_TYPE)
+              ) {
+                categoryDrag(e, categoryTarget);
+                return;
+              }
+              if (!onDrop) return;
+              const ids = droppedIds(e);
               if (!ids.length) return;
               e.preventDefault();
               e.stopPropagation();
@@ -251,6 +318,7 @@ export function PaperSidebar({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [rootOver, setRootOver] = useState(false);
   const alt = useAltKey();
   const pinned = prefs.pinned || [];
   const hidden = prefs.hidden || [];
@@ -409,6 +477,8 @@ export function PaperSidebar({
           withinCategory(folder, name),
         )}
         color={colored[colorIndex]?.color}
+        dragCategory={name}
+        categoryTarget={name}
         onSelect={() => choose(key)}
         onDrop={(ids) => void addToCategory(docsFor(ids), name)}
         menu={
@@ -716,7 +786,19 @@ export function PaperSidebar({
         </nav>
       </section>
       <section>
-        <h3 className="paper-nav-heading">
+        <h3
+          className="paper-nav-heading"
+          data-drop-over={rootOver || undefined}
+          onDragOver={(e) => setRootOver(categoryDrag(e, ""))}
+          onDragLeave={(e) => {
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+            setRootOver(false);
+          }}
+          onDrop={(e) => {
+            setRootOver(false);
+            categoryDrag(e, "");
+          }}
+        >
           分类
           <DropdownMenu>
             <DropdownMenuTrigger

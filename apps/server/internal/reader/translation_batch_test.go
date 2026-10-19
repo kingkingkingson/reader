@@ -82,40 +82,24 @@ func TestTranslationBatchBoundariesAndContext(t *testing.T) {
 	if len(retry[0].Paragraphs) != 1 || retry[0].Paragraphs[0].BlockID != m.Blocks[1].ID || retry[0].After[0].BlockID != m.Blocks[2].ID {
 		t.Fatal("retry changed boundaries or regenerated completed text")
 	}
-	prompt := translationPrompt(Document{Title: "论文标题", Author: "作者"}, m, batches[0], "", "")
+	prompt := translationPrompt(Document{Title: "论文标题", Author: "作者"}, m, batches[0], "")
 	if !strings.Contains(prompt, `"title":"论文标题"`) || !strings.Contains(prompt, `"author":"作者"`) {
 		t.Fatal("metadata not attached")
 	}
-	if strings.Contains(prompt, "术语说明") {
-		t.Fatal("empty glossary injected")
-	}
 }
 
-func TestTranslationGlossaryReachesPrompt(t *testing.T) {
+func TestSettingsOmitRetiredTranslationGlossary(t *testing.T) {
 	s := testServer(t)
 	s.Token = "test-secret"
-	if w := request(t, s, "PUT", "/api/settings", strings.NewReader(`{"translationGlossary":"  agent 译为智能体，不要译成代理。  "}`)); w.Code != 200 {
+	if w := request(t, s, "PUT", "/api/settings", strings.NewReader(`{"appearance":"dark","translationGlossary":"agent 译为智能体"}`)); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	got := s.readerTranslationGlossary()
-	if got != "agent 译为智能体，不要译成代理。" {
-		t.Fatalf("glossary = %q", got)
+	var stored string
+	if err := s.Store.DB.QueryRow("SELECT value FROM settings WHERE key='reader'").Scan(&stored); err != nil {
+		t.Fatal(err)
 	}
-	prompt := translationPrompt(Document{Title: "t"}, layoutManifest{}, translationBatch{}, "", got)
-	note := strings.Index(prompt, "术语说明：\nagent 译为智能体，不要译成代理。")
-	data := strings.Index(prompt, "输入资料：")
-	if note < 0 || data < 0 || note > data {
-		t.Fatal("glossary missing or placed inside document data")
-	}
-	if strings.Contains(translationPrompt(Document{}, layoutManifest{}, translationBatch{}, "", " \n\t "), "术语说明") {
-		t.Fatal("blank glossary injected")
-	}
-	long, _ := json.Marshal(map[string]any{"translationGlossary": strings.Repeat("字", translationGlossaryLimit+1)})
-	if w := request(t, s, "PUT", "/api/settings", strings.NewReader(string(long))); w.Code != 400 {
-		t.Fatalf("overlong glossary accepted: %d %s", w.Code, w.Body.String())
-	}
-	if w := request(t, s, "PUT", "/api/settings", strings.NewReader(`{"translationGlossary":1}`)); w.Code != 400 {
-		t.Fatal("non-text glossary accepted")
+	if strings.Contains(stored, "translationGlossary") || !strings.Contains(stored, `"appearance":"dark"`) {
+		t.Fatalf("retired glossary retained: %s", stored)
 	}
 }
 func TestTranslationJSONLPublishesOnlyCompleteValidatedLines(t *testing.T) {

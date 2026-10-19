@@ -124,6 +124,7 @@ import { PDFReadingView } from "./translation/PDFReadingView";
 import { useReaderStore } from "./store";
 import { scheduleProgress, flushProgress } from "./progress";
 import { Slider } from "@reader/ui/components/slider";
+import { OverlayContainerContext } from "@reader/ui/lib/overlay-container";
 import { TranslationFontControls } from "./TranslationFontControls";
 function IconButton({
   label,
@@ -218,11 +219,13 @@ export function Workspace({
   theme,
   processing,
   onSettings,
+  active = true,
 }: {
   document: ReaderDocument;
   theme: ReaderTheme;
   processing?: Processing;
   onSettings: () => void;
+  active?: boolean;
 }) {
   const { setTheme, aiConfig, setAIConfig, aiModelSaving } = useReaderStore();
   const translationSize = theme.translationFontSize ?? 1;
@@ -298,7 +301,7 @@ export function Workspace({
       });
     },
   );
-  const [left, setLeft] = useState(true);
+  const [left, setLeft] = useState(false);
   const [right, setRight] = useState(true);
   const leftPanel = usePanelRef();
   const rightPanel = usePanelRef();
@@ -368,6 +371,7 @@ export function Workspace({
     null,
   );
   const readingPane = useRef<HTMLDivElement>(null);
+  const overlay = useRef<HTMLDivElement>(null);
   const provider = aiConfig?.primary ?? "";
   const [prompt, setPrompt] = useState("");
   const [quotes, setQuotes] = useState<ReaderSelection[]>([]);
@@ -402,13 +406,17 @@ export function Workspace({
     setSearchedQuery("");
     setSearching(false);
   }, [doc.id]);
-  useShortcut("readerLeft", () => setLeft((value) => !value));
-  useShortcut("readerRight", () => setRight((value) => !value));
-  useShortcut("search", () => {
-    setLeft(true);
-    setLeftTab("search");
-    requestAnimationFrame(() => searchInput.current?.focus());
-  });
+  useShortcut("readerLeft", () => setLeft((value) => !value), active);
+  useShortcut("readerRight", () => setRight((value) => !value), active);
+  useShortcut(
+    "search",
+    () => {
+      setLeft(true);
+      setLeftTab("search");
+      requestAnimationFrame(() => searchInput.current?.focus());
+    },
+    active,
+  );
   useEffect(() => {
     let alive = true;
     session.activate();
@@ -540,7 +548,7 @@ export function Workspace({
       adapter?.clearSelection();
       setSelection(null);
     },
-    () => !annotationsLoaded || annotationSaving.current || noteOpen,
+    () => !active || !annotationsLoaded || annotationSaving.current || noteOpen,
   );
 
   const [hoveredAnnotation, setHoveredAnnotation] =
@@ -914,908 +922,936 @@ export function Workspace({
     </div>
   );
   return (
-    <div className="workspace">
-      <header className="reader-toolbar">
-        <div className="reader-title-group">
-          <IconButton
-            label="目录与搜索"
-            active={left}
-            expanded={left}
-            onClick={() => setLeft(!left)}
-          >
-            <PanelLeft />
-          </IconButton>
-        </div>
-        <div className="toolbar-actions">
-          {returnLocation && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={referenceBusy}
-              onClick={() => void returnFromReference()}
-            >
-              <ArrowLeft className="size-3" />
-              返回阅读位置
-            </Button>
-          )}
-          <IconButton label="文档概要" onClick={() => setOverviewOpen(true)}>
-            <BookOpen />
-          </IconButton>
-          <div ref={setReadingToolbar} />
-          <span className="toolbar-divider" />
-          {doc.type === "pdf" && (
-            <div
-              className="pdf-zoom-controls"
-              role="group"
-              aria-label="页面缩放"
-            >
-              <IconButton
-                label="缩小"
-                disabled={
-                  !adapter ||
-                  (typeof theme.zoom === "number" && theme.zoom <= 0.25)
-                }
-                onClick={() => adapter?.adjustZoom?.("out")}
-              >
-                <ZoomOut />
-              </IconButton>
-              <IconButton
-                label="放大"
-                disabled={
-                  !adapter ||
-                  (typeof theme.zoom === "number" && theme.zoom >= 5)
-                }
-                onClick={() => adapter?.adjustZoom?.("in")}
-              >
-                <ZoomIn />
-              </IconButton>
-              <IconButton
-                label="适合宽度"
-                active={theme.zoom === "width"}
-                disabled={!adapter}
-                onClick={() => adapter?.adjustZoom?.("width")}
-              >
-                <UnfoldHorizontal />
-              </IconButton>
-            </div>
-          )}
-          <div ref={setSourceAutoCenterToolbar} />
-          <IconButton
-            label="添加书签"
-            onClick={() => void annotate("bookmark")}
-          >
-            <BookmarkPlus />
-          </IconButton>
-          <Popover>
-            <PopoverTrigger
-              render={
-                <Button size="icon-sm" variant="ghost" aria-label="阅读外观" />
-              }
-            >
-              <Type />
-            </PopoverTrigger>
-            <PopoverContent className="w-72">
-              <h3 className="text-sm font-medium">阅读外观</h3>
-              <div className="space-y-4">
-                <Tabs
-                  value={
-                    theme.mode === "dark"
-                      ? theme.pdfDarkContrast === "high"
-                        ? "dark"
-                        : "gray"
-                      : theme.mode
-                  }
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    const mode =
-                      value === "gray"
-                        ? "dark"
-                        : (value as "light" | "sepia" | "cream" | "dark");
-                    setTheme({
-                      mode,
-                      appearance: mode,
-                      ...(mode === "dark"
-                        ? {
-                            pdfDarkContrast: value === "gray" ? "soft" : "high",
-                          }
-                        : {}),
-                    });
-                  }}
-                >
-                  <TabsList className="w-full" aria-label="阅读配色">
-                    <TabsTrigger value="light">浅色</TabsTrigger>
-                    <TabsTrigger value="dark">深色</TabsTrigger>
-                    <TabsTrigger value="sepia">纸张</TabsTrigger>
-                    <TabsTrigger value="cream">米黄</TabsTrigger>
-                    <TabsTrigger value="gray">灰色</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-                <div className="flex items-center gap-3">
-                  <span className="shrink-0 text-sm">Agent 字号</span>
-                  <Slider
-                    className="reading-appearance-slider min-w-0 flex-1"
-                    thumbLabel="Agent 字号"
-                    min={80}
-                    max={160}
-                    step={5}
-                    value={[Math.round(assistantSize * 100)]}
-                    onValueChange={(value) =>
-                      setTheme({
-                        assistantFontScale:
-                          (Array.isArray(value) ? value[0] : value) / 100,
-                      })
-                    }
-                  />
-                  <span className="w-10 text-right text-xs tabular-nums">
-                    {Math.round(assistantSize * 100)}%
-                  </span>
-                </div>
-                {doc.type === "epub" ? (
-                  <>
-                    <div className="setting-row">
-                      <span>字号</span>
-                      <Button
-                        size="icon-xs"
-                        variant="outline"
-                        onClick={() =>
-                          setTheme({
-                            fontSize: Math.max(0.8, theme.fontSize - 0.1),
-                          })
-                        }
-                      >
-                        −
-                      </Button>
-                      <span>{Math.round(theme.fontSize * 100)}%</span>
-                      <Button
-                        size="icon-xs"
-                        variant="outline"
-                        onClick={() =>
-                          setTheme({
-                            fontSize: Math.min(2.4, theme.fontSize + 0.1),
-                          })
-                        }
-                      >
-                        +
-                      </Button>
-                    </div>
-                    <div className="setting-row">
-                      <span>行距</span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setTheme({
-                            lineHeight:
-                              theme.lineHeight >= 2.2
-                                ? 1.4
-                                : Math.round((theme.lineHeight + 0.2) * 10) /
-                                  10,
-                          })
-                        }
-                      >
-                        {theme.lineHeight.toFixed(1)}
-                      </Button>
-                      <span>页边距</span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setTheme({
-                            margin: theme.margin >= 64 ? 16 : theme.margin + 16,
-                          })
-                        }
-                      >
-                        {theme.margin}
-                      </Button>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setTheme({
-                            fontFamily:
-                              theme.fontFamily === "serif"
-                                ? "sans-serif"
-                                : "serif",
-                          })
-                        }
-                      >
-                        {theme.fontFamily === "serif"
-                          ? "宋体 / 衬线"
-                          : "黑体 / 无衬线"}
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <span className="shrink-0 text-sm">原文缩放</span>
-                      <Slider
-                        className="reading-appearance-slider min-w-0 flex-1"
-                        thumbLabel="原文缩放"
-                        min={50}
-                        max={300}
-                        step={5}
-                        value={[
-                          typeof theme.zoom === "number"
-                            ? Math.round(theme.zoom * 100)
-                            : 100,
-                        ]}
-                        onValueChange={(value) =>
-                          setTheme({
-                            zoom:
-                              (Array.isArray(value) ? value[0] : value) / 100,
-                          })
-                        }
-                      />
-                      <span className="w-10 text-right text-xs tabular-nums">
-                        {typeof theme.zoom === "number"
-                          ? `${Math.round(theme.zoom * 100)}%`
-                          : "自动"}
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setTheme({ zoom: "width" })}
-                      >
-                        适宽
-                      </Button>
-                    </div>
-                  </>
-                )}
-                <div className="flex items-center gap-3">
-                  <span className="shrink-0 text-sm">译文字号</span>
-                  <Slider
-                    className="reading-appearance-slider min-w-0 flex-1"
-                    thumbLabel="译文字号"
-                    min={80}
-                    max={160}
-                    step={5}
-                    value={[Math.round(translationSize * 100)]}
-                    onValueChange={(value) =>
-                      setTheme({
-                        translationFontSize:
-                          (Array.isArray(value) ? value[0] : value) / 100,
-                      })
-                    }
-                  />
-                  <span className="w-10 text-right text-xs tabular-nums">
-                    {Math.round(translationSize * 100)}%
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setTheme({ translationFontSize: 1 })}
-                  >
-                    恢复
-                  </Button>
-                </div>
-                <TranslationFontControls theme={theme} setTheme={setTheme} />
-              </div>
-            </PopoverContent>
-          </Popover>
-          <IconButton
-            label="Agent 与批注"
-            active={right}
-            expanded={right}
-            onClick={() => setRight(!right)}
-          >
-            <Sparkles />
-          </IconButton>
-          <IconButton label="设置" onClick={onSettings}>
-            <Settings2 />
-          </IconButton>
-        </div>
-      </header>
-      <ResizablePanelGroup
-        orientation="horizontal"
-        className="reader-panels"
-        elementRef={panelGroup}
-        onLayoutChanged={(layout, { isUserInteraction }) => {
-          if (isUserInteraction) {
-            setLeft(layout.navigation > 0);
-            setRight(layout.assistant > 0);
-          }
-        }}
-        onPointerDownCapture={(event) => {
-          if (
-            (event.target as Element).closest('[data-slot="resizable-handle"]')
-          )
-            panelGroup.current?.removeAttribute("data-toggling");
-        }}
+    <OverlayContainerContext.Provider value={overlay}>
+      <div
+        ref={overlay}
+        className="workspace"
+        data-hidden={active ? undefined : true}
+        inert={!active}
+        aria-hidden={active ? undefined : true}
       >
-        <ResizablePanel
-          id="navigation"
-          panelRef={leftPanel}
-          collapsible
-          collapsedSize={0}
-          style={{ overflow: "hidden" }}
-          defaultSize="15%"
-          minSize="180px"
-          maxSize="30%"
-        >
-          <aside className="reader-sidebar" data-open={left} inert={!left}>
-            <Tabs
-              value={leftTab}
-              onValueChange={(value) => setLeftTab(String(value))}
-              className="h-full gap-0"
+        <header className="reader-toolbar">
+          <div className="reader-title-group">
+            <IconButton
+              label="目录与搜索"
+              active={left}
+              expanded={left}
+              onClick={() => setLeft(!left)}
             >
-              <TabsList className="panel-tabs">
-                <TabsTrigger value="toc">
-                  <ListTree className="size-3.5" />
-                  目录
-                </TabsTrigger>
-                <TabsTrigger value="search">
-                  <Search className="size-3.5" />
-                  搜索
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value="toc" className="min-h-0 flex-1">
-                <ScrollArea className="h-full">
-                  <TOCTree items={toc} go={move} location={location} />
-                  {!toc.length && (
-                    <p className="p-4 text-xs text-muted-foreground">
-                      正在读取目录…
-                    </p>
-                  )}
-                </ScrollArea>
-              </TabsContent>
-              <TabsContent value="search" className="min-h-0 flex-1 p-3">
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void search();
-                  }}
-                  className="flex gap-1"
-                >
-                  <Input
-                    aria-label="搜索文档"
-                    ref={searchInput}
-                    placeholder="搜索文档内容…"
-                    value={query}
-                    onChange={(e) => {
-                      searchSerial.current++;
-                      setQuery(e.target.value);
-                      setResults([]);
-                      setSearchedQuery("");
-                      setSearching(false);
-                    }}
-                  />
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    disabled={searching}
-                    aria-label="搜索"
-                  >
-                    <Search />
-                  </Button>
-                </form>
-                <p className="my-3 text-xs text-muted-foreground">
-                  {searching ? "正在搜索…" : `${results.length} 个结果`}
-                </p>
-                <ScrollArea className="h-[calc(100%-90px)]">
-                  {results.map((result) => (
-                    <Button
-                      key={result.id}
-                      variant="ghost"
-                      className="search-result"
-                      onClick={() => openSearchResult(result)}
-                    >
-                      <small>
-                        {locationLabel(result.location)}
-                        {result.side === "translation"
-                          ? " · 译文"
-                          : result.side === "source"
-                            ? " · 原文"
-                            : ""}
-                      </small>
-                      <span>{result.excerpt}</span>
-                    </Button>
-                  ))}
-                </ScrollArea>
-              </TabsContent>
-            </Tabs>
-          </aside>
-        </ResizablePanel>
-        <ResizableHandle
-          disabled={!left}
-          className={left ? "" : "sidebar-handle-closed"}
-        />
-        <ResizablePanel id="reading" minSize="30%">
-          <div className="reading-pane" ref={readingPane}>
-            {(() => {
-              const ReadingView =
-                doc.type === "pdf" ? PDFReadingView : EPUBReadingView;
-              return (
-                <ReadingView
-                  sidebarsOpen={{ left, right }}
-                  document={doc}
-                  theme={theme}
-                  annotations={annotations}
-                  blocks={blocks}
-                  processing={processing}
-                  toolbarHost={readingToolbar}
-                  autoCenterHost={sourceAutoCenterToolbar}
-                  pageNavigation={pageNavigation}
-                  searchResults={results}
-                  searchQuery={searchedQuery}
-                  onReady={(engine, items) => {
-                    setAdapter(engine);
-                    setTOC(items);
-                  }}
-                  events={{
-                    zoom: (zoom) => setTheme({ zoom }),
-                    location: saveLocation,
-                    selection: selectText,
-                    annotation: selectAnnotation,
-                    annotationHover: (target) =>
-                      setHoveredAnnotation((current) =>
-                        current &&
-                        target &&
-                        current.ids.join(",") === target.ids.join(",")
-                          ? current
-                          : target,
-                      ),
-                    linkPreview: setLinkPreview,
-                    internalLink: (origin) => {
-                      navigationRef.current?.remember(origin);
-                      setReturnLocation(navigationRef.current?.origin);
-                    },
-                    blockAction,
-                  }}
-                />
-              );
-            })()}
-            {!selection && annotationTarget && selectedAnnotation && (
-              <AnnotationToolbar
-                annotation={selectedAnnotation}
-                anchor={annotationTarget.anchor}
-                pane={readingPane}
-                deleting={deleting.has(selectedAnnotation.id)}
-                onDelete={(id) => void removeAnnotation(id)}
-                onNote={editAnnotationNote}
-                onAskAI={askAnnotationAI}
-                onAnswer={(annotation) => void answerQuestion(annotation)}
-                onColor={(annotation, color) => void recolor(annotation, color)}
-              />
-            )}
-
-            {selection?.anchor && (
-              <SelectionToolbar anchor={selection.anchor} pane={readingPane}>
-                <ColorSwatches
-                  action="高亮"
-                  onPick={(color) => {
-                    chooseColor(color);
-                    void annotate("highlight", "", color);
-                  }}
-                />
-                <IconButton
-                  label="下划线"
-                  onClick={() => void annotate("underline")}
-                >
-                  <Underline />
-                </IconButton>
-                <IconButton
-                  label="添加批注"
-                  onClick={() => {
-                    setNoteKind("note");
-                    setEditingAnnotation(null);
-                    setNoteSelection(selection);
-                    setNote("");
-                    setNoteOpen(true);
-                    adapter?.clearSelection();
-                  }}
-                >
-                  <StickyNote />
-                </IconButton>
-                <IconButton
-                  label="提问"
-                  onClick={() => {
-                    setNoteKind("question");
-                    setEditingAnnotation(null);
-                    setNoteSelection(selection);
-                    setNote("");
-                    setNoteOpen(true);
-                    adapter?.clearSelection();
-                  }}
-                >
-                  <CircleHelp />
-                </IconButton>
-                <IconButton
-                  label="问 AI"
-                  onClick={() =>
-                    void send(
-                      "请解释这段文字的含义，区分原文结论与你的补充说明。",
-                      [selection],
-                    )
-                  }
-                >
-                  <Sparkles />
-                </IconButton>
-                <IconButton label="引用到对话" onClick={addQuote}>
-                  <Quote />
-                </IconButton>
-                <IconButton
-                  label="划词翻译"
-                  onClick={() => {
-                    setTranslationSelection(selection);
-                    setSelection(null);
-                    adapter?.clearSelection();
-                  }}
-                >
-                  <Languages />
-                </IconButton>
-              </SelectionToolbar>
-            )}
+              <PanelLeft />
+            </IconButton>
           </div>
-        </ResizablePanel>
-        <ResizableHandle
-          disabled={!right}
-          className={right ? "" : "sidebar-handle-closed"}
-        />
-        <ResizablePanel
-          id="assistant"
-          panelRef={rightPanel}
-          collapsible
-          collapsedSize={0}
-          style={{ overflow: "hidden" }}
-          defaultSize="25%"
-          minSize="250px"
-          maxSize="45%"
-        >
-          <aside className="assistant-sidebar" data-open={right} inert={!right}>
-            <Tabs
-              value={rightTab}
-              onValueChange={(value) => setRightTab(String(value))}
-              className="h-full gap-0"
-            >
-              <TabsList className="panel-tabs">
-                <TabsTrigger value="ai">
-                  <Sparkles className="size-3.5" />
-                  Agent
-                </TabsTrigger>
-                <TabsTrigger value="notes">
-                  <StickyNote className="size-3.5" />
-                  批注<small>{annotations.length || ""}</small>
-                </TabsTrigger>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  title="聊天用量统计"
-                  aria-label="聊天用量统计"
-                  onClick={() => setUsageOpen(true)}
+          <div className="toolbar-actions">
+            {returnLocation && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={referenceBusy}
+                onClick={() => void returnFromReference()}
+              >
+                <ArrowLeft className="size-3" />
+                返回阅读位置
+              </Button>
+            )}
+            <IconButton label="文档概要" onClick={() => setOverviewOpen(true)}>
+              <BookOpen />
+            </IconButton>
+            <div ref={setReadingToolbar} />
+            <span className="toolbar-divider" />
+            {doc.type === "pdf" && (
+              <div
+                className="pdf-zoom-controls"
+                role="group"
+                aria-label="页面缩放"
+              >
+                <IconButton
+                  label="缩小"
+                  disabled={
+                    !adapter ||
+                    (typeof theme.zoom === "number" && theme.zoom <= 0.25)
+                  }
+                  onClick={() => adapter?.adjustZoom?.("out")}
                 >
-                  <ChartColumn />
-                </Button>
-              </TabsList>
-              <TabsContent
-                value="ai"
-                className="ai-panel"
-                style={
-                  { "--assistant-font-scale": assistantSize } as CSSProperties
+                  <ZoomOut />
+                </IconButton>
+                <IconButton
+                  label="放大"
+                  disabled={
+                    !adapter ||
+                    (typeof theme.zoom === "number" && theme.zoom >= 5)
+                  }
+                  onClick={() => adapter?.adjustZoom?.("in")}
+                >
+                  <ZoomIn />
+                </IconButton>
+                <IconButton
+                  label="适合宽度"
+                  active={theme.zoom === "width"}
+                  disabled={!adapter}
+                  onClick={() => adapter?.adjustZoom?.("width")}
+                >
+                  <UnfoldHorizontal />
+                </IconButton>
+              </div>
+            )}
+            <div ref={setSourceAutoCenterToolbar} />
+            <IconButton
+              label="添加书签"
+              onClick={() => void annotate("bookmark")}
+            >
+              <BookmarkPlus />
+            </IconButton>
+            <Popover>
+              <PopoverTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="阅读外观"
+                  />
                 }
               >
-                <AssistantPanel
-                  key={doc.id}
-                  session={session}
-                  onRegenerate={() => void regenerate()}
-                  regenerateDisabled={aiModelSaving || sending}
-                  renderAnswer={(message, content) => (
-                    <SourceReferences
-                      key={message.id}
-                      message={message}
-                      toc={toc}
-                      adapter={adapter}
-                      onNavigate={visitReference}
-                    >
-                      {content}
-                    </SourceReferences>
-                  )}
-                  empty={
-                    <div className="chat-empty">
-                      <p>
-                        选中原文，可以翻译、解释，
-                        <br />
-                        或引用多段文字一起讨论。
-                      </p>
-                      <Button
-                        variant="outline"
-                        className="suggestion"
-                        disabled={!adapter}
-                        onClick={() =>
-                          void send(
-                            doc.type === "epub"
-                              ? "请总结当前章节的核心内容，并列出值得思考的问题。"
-                              : "请总结当前 PDF 页的主要内容，保留重要术语。",
-                            [],
-                            true,
-                          )
-                        }
-                      >
-                        <BookOpen />
-                        总结当前{doc.type === "epub" ? "章节" : "页面"}
-                        <ArrowLeft className="ml-auto rotate-180" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="suggestion"
-                        disabled={!adapter}
-                        onClick={() =>
-                          void send(
-                            "请找出当前内容的核心概念，并用简明的语言解释。",
-                            [],
-                            true,
-                          )
-                        }
-                      >
-                        <MessageSquare />
-                        解释核心概念
-                        <ArrowLeft className="ml-auto rotate-180" />
-                      </Button>
-                      <p className="privacy-note">
-                        主动引用的文字和图片随问题发送；文档 Agent
-                        按需检索、读取原文。
-                      </p>
-                    </div>
-                  }
-                  extras={(message) => (
+                <Type />
+              </PopoverTrigger>
+              <PopoverContent className="w-72">
+                <h3 className="text-sm font-medium">阅读外观</h3>
+                <div className="space-y-4">
+                  <Tabs
+                    value={
+                      theme.mode === "dark"
+                        ? theme.pdfDarkContrast === "high"
+                          ? "dark"
+                          : "gray"
+                        : theme.mode
+                    }
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      const mode =
+                        value === "gray"
+                          ? "dark"
+                          : (value as "light" | "sepia" | "cream" | "dark");
+                      setTheme({
+                        mode,
+                        appearance: mode,
+                        ...(mode === "dark"
+                          ? {
+                              pdfDarkContrast:
+                                value === "gray" ? "soft" : "high",
+                            }
+                          : {}),
+                      });
+                    }}
+                  >
+                    <TabsList className="w-full" aria-label="阅读配色">
+                      <TabsTrigger value="light">浅色</TabsTrigger>
+                      <TabsTrigger value="dark">深色</TabsTrigger>
+                      <TabsTrigger value="sepia">纸张</TabsTrigger>
+                      <TabsTrigger value="cream">米黄</TabsTrigger>
+                      <TabsTrigger value="gray">灰色</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  <div className="flex items-center gap-3">
+                    <span className="shrink-0 text-sm">Agent 字号</span>
+                    <Slider
+                      className="reading-appearance-slider min-w-0 flex-1"
+                      thumbLabel="Agent 字号"
+                      min={80}
+                      max={160}
+                      step={5}
+                      value={[Math.round(assistantSize * 100)]}
+                      onValueChange={(value) =>
+                        setTheme({
+                          assistantFontScale:
+                            (Array.isArray(value) ? value[0] : value) / 100,
+                        })
+                      }
+                    />
+                    <span className="w-10 text-right text-xs tabular-nums">
+                      {Math.round(assistantSize * 100)}%
+                    </span>
+                  </div>
+                  {doc.type === "epub" ? (
                     <>
-                      {!!message.attachments?.length &&
-                        imageAttachments(message.attachments)}
+                      <div className="setting-row">
+                        <span>字号</span>
+                        <Button
+                          size="icon-xs"
+                          variant="outline"
+                          onClick={() =>
+                            setTheme({
+                              fontSize: Math.max(0.8, theme.fontSize - 0.1),
+                            })
+                          }
+                        >
+                          −
+                        </Button>
+                        <span>{Math.round(theme.fontSize * 100)}%</span>
+                        <Button
+                          size="icon-xs"
+                          variant="outline"
+                          onClick={() =>
+                            setTheme({
+                              fontSize: Math.min(2.4, theme.fontSize + 0.1),
+                            })
+                          }
+                        >
+                          +
+                        </Button>
+                      </div>
+                      <div className="setting-row">
+                        <span>行距</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setTheme({
+                              lineHeight:
+                                theme.lineHeight >= 2.2
+                                  ? 1.4
+                                  : Math.round((theme.lineHeight + 0.2) * 10) /
+                                    10,
+                            })
+                          }
+                        >
+                          {theme.lineHeight.toFixed(1)}
+                        </Button>
+                        <span>页边距</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setTheme({
+                              margin:
+                                theme.margin >= 64 ? 16 : theme.margin + 16,
+                            })
+                          }
+                        >
+                          {theme.margin}
+                        </Button>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setTheme({
+                              fontFamily:
+                                theme.fontFamily === "serif"
+                                  ? "sans-serif"
+                                  : "serif",
+                            })
+                          }
+                        >
+                          {theme.fontFamily === "serif"
+                            ? "宋体 / 衬线"
+                            : "黑体 / 无衬线"}
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <span className="shrink-0 text-sm">原文缩放</span>
+                        <Slider
+                          className="reading-appearance-slider min-w-0 flex-1"
+                          thumbLabel="原文缩放"
+                          min={50}
+                          max={300}
+                          step={5}
+                          value={[
+                            typeof theme.zoom === "number"
+                              ? Math.round(theme.zoom * 100)
+                              : 100,
+                          ]}
+                          onValueChange={(value) =>
+                            setTheme({
+                              zoom:
+                                (Array.isArray(value) ? value[0] : value) / 100,
+                            })
+                          }
+                        />
+                        <span className="w-10 text-right text-xs tabular-nums">
+                          {typeof theme.zoom === "number"
+                            ? `${Math.round(theme.zoom * 100)}%`
+                            : "自动"}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setTheme({ zoom: "width" })}
+                        >
+                          适宽
+                        </Button>
+                      </div>
                     </>
                   )}
-                  references={(message) => (
-                    <>
-                      {message.readingLocation && (
-                        <span
-                          className="chat-reading-location"
-                          title="提问时的阅读位置"
-                        >
-                          <BookOpen size={12} aria-hidden="true" />
-                          {referenceLabel(message.readingLocation, toc)}
-                        </span>
-                      )}
+                  <div className="flex items-center gap-3">
+                    <span className="shrink-0 text-sm">译文字号</span>
+                    <Slider
+                      className="reading-appearance-slider min-w-0 flex-1"
+                      thumbLabel="译文字号"
+                      min={80}
+                      max={160}
+                      step={5}
+                      value={[Math.round(translationSize * 100)]}
+                      onValueChange={(value) =>
+                        setTheme({
+                          translationFontSize:
+                            (Array.isArray(value) ? value[0] : value) / 100,
+                        })
+                      }
+                    />
+                    <span className="w-10 text-right text-xs tabular-nums">
+                      {Math.round(translationSize * 100)}%
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setTheme({ translationFontSize: 1 })}
+                    >
+                      恢复
+                    </Button>
+                  </div>
+                  <TranslationFontControls theme={theme} setTheme={setTheme} />
+                </div>
+              </PopoverContent>
+            </Popover>
+            <IconButton
+              label="Agent 与批注"
+              active={right}
+              expanded={right}
+              onClick={() => setRight(!right)}
+            >
+              <Sparkles />
+            </IconButton>
+            <IconButton label="设置" onClick={onSettings}>
+              <Settings2 />
+            </IconButton>
+          </div>
+        </header>
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="reader-panels"
+          elementRef={panelGroup}
+          onLayoutChanged={(layout, { isUserInteraction }) => {
+            if (isUserInteraction) {
+              setLeft(layout.navigation > 0);
+              setRight(layout.assistant > 0);
+            }
+          }}
+          onPointerDownCapture={(event) => {
+            if (
+              (event.target as Element).closest(
+                '[data-slot="resizable-handle"]',
+              )
+            )
+              panelGroup.current?.removeAttribute("data-toggling");
+          }}
+        >
+          <ResizablePanel
+            id="navigation"
+            panelRef={leftPanel}
+            collapsible
+            collapsedSize={0}
+            style={{ overflow: "hidden" }}
+            defaultSize={0}
+            minSize="180px"
+            maxSize="30%"
+          >
+            <aside className="reader-sidebar" data-open={left} inert={!left}>
+              <Tabs
+                value={leftTab}
+                onValueChange={(value) => setLeftTab(String(value))}
+                className="h-full gap-0"
+              >
+                <TabsList className="panel-tabs">
+                  <TabsTrigger value="toc">
+                    <ListTree className="size-3.5" />
+                    目录
+                  </TabsTrigger>
+                  <TabsTrigger value="search">
+                    <Search className="size-3.5" />
+                    搜索
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="toc" className="min-h-0 flex-1">
+                  <ScrollArea className="h-full">
+                    <TOCTree items={toc} go={move} location={location} />
+                    {!toc.length && (
+                      <p className="p-4 text-xs text-muted-foreground">
+                        正在读取目录…
+                      </p>
+                    )}
+                  </ScrollArea>
+                </TabsContent>
+                <TabsContent value="search" className="min-h-0 flex-1 p-3">
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void search();
+                    }}
+                    className="flex gap-1"
+                  >
+                    <Input
+                      aria-label="搜索文档"
+                      ref={searchInput}
+                      placeholder="搜索文档内容…"
+                      value={query}
+                      onChange={(e) => {
+                        searchSerial.current++;
+                        setQuery(e.target.value);
+                        setResults([]);
+                        setSearchedQuery("");
+                        setSearching(false);
+                      }}
+                    />
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      disabled={searching}
+                      aria-label="搜索"
+                    >
+                      <Search />
+                    </Button>
+                  </form>
+                  <p className="my-3 text-xs text-muted-foreground">
+                    {searching ? "正在搜索…" : `${results.length} 个结果`}
+                  </p>
+                  <ScrollArea className="h-[calc(100%-90px)]">
+                    {results.map((result) => (
+                      <Button
+                        key={result.id}
+                        variant="ghost"
+                        className="search-result"
+                        onClick={() => openSearchResult(result)}
+                      >
+                        <small>
+                          {locationLabel(result.location)}
+                          {result.side === "translation"
+                            ? " · 译文"
+                            : result.side === "source"
+                              ? " · 原文"
+                              : ""}
+                        </small>
+                        <span>{result.excerpt}</span>
+                      </Button>
+                    ))}
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
+            </aside>
+          </ResizablePanel>
+          <ResizableHandle
+            disabled={!left}
+            className={left ? "" : "sidebar-handle-closed"}
+          />
+          <ResizablePanel id="reading" minSize="30%">
+            <div className="reading-pane" ref={readingPane}>
+              {(() => {
+                const ReadingView =
+                  doc.type === "pdf" ? PDFReadingView : EPUBReadingView;
+                return (
+                  <ReadingView
+                    sidebarsOpen={{ left, right }}
+                    document={doc}
+                    theme={theme}
+                    annotations={annotations}
+                    blocks={blocks}
+                    processing={processing}
+                    toolbarHost={readingToolbar}
+                    autoCenterHost={sourceAutoCenterToolbar}
+                    pageNavigation={pageNavigation}
+                    searchResults={results}
+                    searchQuery={searchedQuery}
+                    onReady={(engine, items) => {
+                      setAdapter(engine);
+                      setTOC(items);
+                    }}
+                    events={{
+                      zoom: (zoom) => setTheme({ zoom }),
+                      location: saveLocation,
+                      selection: selectText,
+                      annotation: selectAnnotation,
+                      annotationHover: (target) =>
+                        setHoveredAnnotation((current) =>
+                          current &&
+                          target &&
+                          current.ids.join(",") === target.ids.join(",")
+                            ? current
+                            : target,
+                        ),
+                      linkPreview: setLinkPreview,
+                      internalLink: (origin) => {
+                        navigationRef.current?.remember(origin);
+                        setReturnLocation(navigationRef.current?.origin);
+                      },
+                      blockAction,
+                    }}
+                  />
+                );
+              })()}
+              {!selection && annotationTarget && selectedAnnotation && (
+                <AnnotationToolbar
+                  annotation={selectedAnnotation}
+                  anchor={annotationTarget.anchor}
+                  pane={readingPane}
+                  deleting={deleting.has(selectedAnnotation.id)}
+                  onDelete={(id) => void removeAnnotation(id)}
+                  onNote={editAnnotationNote}
+                  onAskAI={askAnnotationAI}
+                  onAnswer={(annotation) => void answerQuestion(annotation)}
+                  onColor={(annotation, color) =>
+                    void recolor(annotation, color)
+                  }
+                />
+              )}
+
+              {selection?.anchor && (
+                <SelectionToolbar anchor={selection.anchor} pane={readingPane}>
+                  <ColorSwatches
+                    action="高亮"
+                    onPick={(color) => {
+                      chooseColor(color);
+                      void annotate("highlight", "", color);
+                    }}
+                  />
+                  <IconButton
+                    label="下划线"
+                    onClick={() => void annotate("underline")}
+                  >
+                    <Underline />
+                  </IconButton>
+                  <IconButton
+                    label="添加批注"
+                    onClick={() => {
+                      setNoteKind("note");
+                      setEditingAnnotation(null);
+                      setNoteSelection(selection);
+                      setNote("");
+                      setNoteOpen(true);
+                      adapter?.clearSelection();
+                    }}
+                  >
+                    <StickyNote />
+                  </IconButton>
+                  <IconButton
+                    label="提问"
+                    onClick={() => {
+                      setNoteKind("question");
+                      setEditingAnnotation(null);
+                      setNoteSelection(selection);
+                      setNote("");
+                      setNoteOpen(true);
+                      adapter?.clearSelection();
+                    }}
+                  >
+                    <CircleHelp />
+                  </IconButton>
+                  <IconButton
+                    label="问 AI"
+                    onClick={() =>
+                      void send(
+                        "请解释这段文字的含义，区分原文结论与你的补充说明。",
+                        [selection],
+                      )
+                    }
+                  >
+                    <Sparkles />
+                  </IconButton>
+                  <IconButton label="引用到对话" onClick={addQuote}>
+                    <Quote />
+                  </IconButton>
+                  <IconButton
+                    label="划词翻译"
+                    onClick={() => {
+                      setTranslationSelection(selection);
+                      setSelection(null);
+                      adapter?.clearSelection();
+                    }}
+                  >
+                    <Languages />
+                  </IconButton>
+                </SelectionToolbar>
+              )}
+            </div>
+          </ResizablePanel>
+          <ResizableHandle
+            disabled={!right}
+            className={right ? "" : "sidebar-handle-closed"}
+          />
+          <ResizablePanel
+            id="assistant"
+            panelRef={rightPanel}
+            collapsible
+            collapsedSize={0}
+            style={{ overflow: "hidden" }}
+            defaultSize="25%"
+            minSize="250px"
+            maxSize="45%"
+          >
+            <aside
+              className="assistant-sidebar"
+              data-open={right}
+              inert={!right}
+            >
+              <Tabs
+                value={rightTab}
+                onValueChange={(value) => setRightTab(String(value))}
+                className="h-full gap-0"
+              >
+                <TabsList className="panel-tabs">
+                  <TabsTrigger value="ai">
+                    <Sparkles className="size-3.5" />
+                    Agent
+                  </TabsTrigger>
+                  <TabsTrigger value="notes">
+                    <StickyNote className="size-3.5" />
+                    批注<small>{annotations.length || ""}</small>
+                  </TabsTrigger>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    title="聊天用量统计"
+                    aria-label="聊天用量统计"
+                    onClick={() => setUsageOpen(true)}
+                  >
+                    <ChartColumn />
+                  </Button>
+                </TabsList>
+                <TabsContent
+                  value="ai"
+                  className="ai-panel"
+                  style={
+                    { "--assistant-font-scale": assistantSize } as CSSProperties
+                  }
+                >
+                  <AssistantPanel
+                    key={doc.id}
+                    session={session}
+                    onRegenerate={() => void regenerate()}
+                    regenerateDisabled={aiModelSaving || sending}
+                    renderAnswer={(message, content) => (
                       <SourceReferences
+                        key={message.id}
                         message={message}
                         toc={toc}
                         adapter={adapter}
                         onNavigate={visitReference}
-                      />
-                    </>
-                  )}
-                />
-                <div className="chat-compose">
-                  {quotes.length > 0 && (
-                    <div className="quote-chips">
-                      {quotes.map((q, i) => (
-                        <div key={i}>
-                          <Quote size={12} />
-                          <span>{q.text}</span>
-                          <Button
-                            size="icon-xs"
-                            variant="ghost"
-                            aria-label="移除引用"
-                            onClick={() =>
-                              setQuotes((items) =>
-                                items.filter((_, j) => j !== i),
-                              )
-                            }
-                          >
-                            <X />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {!!images.length && imageAttachments(images, true)}
-                  <Textarea
-                    ref={composeInput}
-                    aria-label="向 AI 提问"
-                    placeholder="问一个问题，或引用选中的文字…"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (
-                        e.key === "Enter" &&
-                        !e.shiftKey &&
-                        !e.altKey &&
-                        !e.nativeEvent.isComposing &&
-                        e.nativeEvent.keyCode !== 229
-                      ) {
-                        e.preventDefault();
-                        if (!e.repeat && adapter && !sending) void send();
-                      }
-                    }}
-                  />
-                  <div className="compose-footer">
-                    <ModelSelector disabled={sending} onSettings={onSettings} />
-                    {sending ? (
-                      <Button
-                        size="icon-sm"
-                        variant="secondary"
-                        aria-label="停止回答"
-                        onClick={() => {
-                          abort.current?.abort();
-                          session.cancel();
-                        }}
                       >
-                        <Square className="size-3" />
-                      </Button>
-                    ) : (
-                      <Button
-                        size="icon-sm"
-                        aria-label="发送问题"
-                        disabled={
-                          !adapter ||
-                          aiModelSaving ||
-                          !provider ||
-                          (!prompt.trim() && !images.length)
-                        }
-                        onClick={() => void send()}
-                      >
-                        <Send className="size-3.5" />
-                      </Button>
+                        {content}
+                      </SourceReferences>
                     )}
+                    empty={
+                      <div className="chat-empty">
+                        <p>
+                          选中原文，可以翻译、解释，
+                          <br />
+                          或引用多段文字一起讨论。
+                        </p>
+                        <Button
+                          variant="outline"
+                          className="suggestion"
+                          disabled={!adapter}
+                          onClick={() =>
+                            void send(
+                              doc.type === "epub"
+                                ? "请总结当前章节的核心内容，并列出值得思考的问题。"
+                                : "请总结当前 PDF 页的主要内容，保留重要术语。",
+                              [],
+                              true,
+                            )
+                          }
+                        >
+                          <BookOpen />
+                          总结当前{doc.type === "epub" ? "章节" : "页面"}
+                          <ArrowLeft className="ml-auto rotate-180" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="suggestion"
+                          disabled={!adapter}
+                          onClick={() =>
+                            void send(
+                              "请找出当前内容的核心概念，并用简明的语言解释。",
+                              [],
+                              true,
+                            )
+                          }
+                        >
+                          <MessageSquare />
+                          解释核心概念
+                          <ArrowLeft className="ml-auto rotate-180" />
+                        </Button>
+                        <p className="privacy-note">
+                          主动引用的文字和图片随问题发送；文档 Agent
+                          按需检索、读取原文。
+                        </p>
+                      </div>
+                    }
+                    extras={(message) => (
+                      <>
+                        {!!message.attachments?.length &&
+                          imageAttachments(message.attachments)}
+                      </>
+                    )}
+                    references={(message) => (
+                      <>
+                        {message.readingLocation && (
+                          <span
+                            className="chat-reading-location"
+                            title="提问时的阅读位置"
+                          >
+                            <BookOpen size={12} aria-hidden="true" />
+                            {referenceLabel(message.readingLocation, toc)}
+                          </span>
+                        )}
+                        <SourceReferences
+                          message={message}
+                          toc={toc}
+                          adapter={adapter}
+                          onNavigate={visitReference}
+                        />
+                      </>
+                    )}
+                  />
+                  <div className="chat-compose">
+                    {quotes.length > 0 && (
+                      <div className="quote-chips">
+                        {quotes.map((q, i) => (
+                          <div key={i}>
+                            <Quote size={12} />
+                            <span>{q.text}</span>
+                            <Button
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="移除引用"
+                              onClick={() =>
+                                setQuotes((items) =>
+                                  items.filter((_, j) => j !== i),
+                                )
+                              }
+                            >
+                              <X />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!!images.length && imageAttachments(images, true)}
+                    <Textarea
+                      ref={composeInput}
+                      aria-label="向 AI 提问"
+                      placeholder="问一个问题，或引用选中的文字…"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (
+                          e.key === "Enter" &&
+                          !e.shiftKey &&
+                          !e.altKey &&
+                          !e.nativeEvent.isComposing &&
+                          e.nativeEvent.keyCode !== 229
+                        ) {
+                          e.preventDefault();
+                          if (!e.repeat && adapter && !sending) void send();
+                        }
+                      }}
+                    />
+                    <div className="compose-footer">
+                      <ModelSelector
+                        disabled={sending}
+                        onSettings={onSettings}
+                      />
+                      {sending ? (
+                        <Button
+                          size="icon-sm"
+                          variant="secondary"
+                          aria-label="停止回答"
+                          onClick={() => {
+                            abort.current?.abort();
+                            session.cancel();
+                          }}
+                        >
+                          <Square className="size-3" />
+                        </Button>
+                      ) : (
+                        <Button
+                          size="icon-sm"
+                          aria-label="发送问题"
+                          disabled={
+                            !adapter ||
+                            aiModelSaving ||
+                            !provider ||
+                            (!prompt.trim() && !images.length)
+                          }
+                          onClick={() => void send()}
+                        >
+                          <Send className="size-3.5" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </TabsContent>
-              <TabsContent value="notes" className="notes-panel">
-                <NotesPanel
-                  document={doc}
-                  annotations={annotations}
-                  messages={chat.messages}
-                  deleting={deleting}
-                  answering={answering}
-                  onGo={focusAnnotation}
-                  onDelete={(id) => void removeAnnotation(id)}
-                  onSave={saveAnnotationText}
-                  onAnswer={(a) => void answerQuestion(a)}
-                  onResolve={(a, resolved) => void resolveQuestion(a, resolved)}
-                  onShowAnswer={showAnswer}
-                  onExport={() => setExportingNotes(true)}
-                />
-              </TabsContent>
-            </Tabs>
-          </aside>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+                </TabsContent>
+                <TabsContent value="notes" className="notes-panel">
+                  <NotesPanel
+                    document={doc}
+                    annotations={annotations}
+                    messages={chat.messages}
+                    deleting={deleting}
+                    answering={answering}
+                    onGo={focusAnnotation}
+                    onDelete={(id) => void removeAnnotation(id)}
+                    onSave={saveAnnotationText}
+                    onAnswer={(a) => void answerQuestion(a)}
+                    onResolve={(a, resolved) =>
+                      void resolveQuestion(a, resolved)
+                    }
+                    onShowAnswer={showAnswer}
+                    onExport={() => setExportingNotes(true)}
+                  />
+                </TabsContent>
+              </Tabs>
+            </aside>
+          </ResizablePanel>
+        </ResizablePanelGroup>
 
-      <SelectionTranslation
-        key={doc.id}
-        selection={translationSelection}
-        onClose={() => setTranslationSelection(null)}
-      />
-      <AnnotationHoverCard
-        target={!selection && !noteOpen ? hoveredAnnotation : null}
-        annotations={annotations}
-        onEdit={editAnnotationNote}
-      />
-      <LinkPreviewPanel
-        key={doc.id}
-        preview={linkPreview}
-        onDismiss={() => setLinkPreview(null)}
-        onNavigate={(location) =>
-          void visitReference(location, "").catch((error) =>
-            toast.error(String(error)),
-          )
-        }
-        renderKey={`${theme.mode}:${theme.pdfDarkImageMode}:${theme.pdfDarkContrast}`}
-      />
-      {previewImage && (
-        <ImagePreview
-          key={previewImage.id}
-          documentId={doc.id}
-          image={previewImage}
-          renderImage={renderBlockImage}
-          onClose={() => setPreviewImage(undefined)}
+        <SelectionTranslation
+          key={doc.id}
+          selection={translationSelection}
+          onClose={() => setTranslationSelection(null)}
         />
-      )}
-      <Dialog
-        open={noteOpen}
-        onOpenChange={(open) => {
-          if (noteSaving) return;
-          setNoteOpen(open);
-          if (!open) {
-            setNoteSelection(null);
-            setEditingAnnotation(null);
+        <AnnotationHoverCard
+          target={!selection && !noteOpen ? hoveredAnnotation : null}
+          annotations={annotations}
+          onEdit={editAnnotationNote}
+        />
+        <LinkPreviewPanel
+          key={doc.id}
+          preview={linkPreview}
+          onDismiss={() => setLinkPreview(null)}
+          onNavigate={(location) =>
+            void visitReference(location, "").catch((error) =>
+              toast.error(String(error)),
+            )
           }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {noteKind === "question"
-                ? editingAnnotation
-                  ? "编辑问题"
-                  : "提问"
-                : editingAnnotation?.note.trim()
-                  ? "编辑批注"
-                  : "添加批注"}
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              {noteKind === "question"
-                ? "就当前选区提问"
-                : "为当前选区添加批注"}
-            </DialogDescription>
-          </DialogHeader>
-          <blockquote className="note-preview">
-            {noteSelection && (
-              <AnnotationQuote
-                quote={noteSelection.text}
-                location={noteSelection.location}
-              />
-            )}
-          </blockquote>
-          <Textarea
-            autoFocus
-            placeholder={
-              noteKind === "question" ? "想弄清楚什么？" : "批注内容…"
-            }
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
+          renderKey={`${theme.mode}:${theme.pdfDarkImageMode}:${theme.pdfDarkContrast}`}
+        />
+        {previewImage && (
+          <ImagePreview
+            key={previewImage.id}
+            documentId={doc.id}
+            image={previewImage}
+            renderImage={renderBlockImage}
+            onClose={() => setPreviewImage(undefined)}
           />
-          {noteKind === "question" ? (
-            <div className="flex gap-2">
+        )}
+        <Dialog
+          open={noteOpen}
+          onOpenChange={(open) => {
+            if (noteSaving) return;
+            setNoteOpen(open);
+            if (!open) {
+              setNoteSelection(null);
+              setEditingAnnotation(null);
+            }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {noteKind === "question"
+                  ? editingAnnotation
+                    ? "编辑问题"
+                    : "提问"
+                  : editingAnnotation?.note.trim()
+                    ? "编辑批注"
+                    : "添加批注"}
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                {noteKind === "question"
+                  ? "就当前选区提问"
+                  : "为当前选区添加批注"}
+              </DialogDescription>
+            </DialogHeader>
+            <blockquote className="note-preview">
+              {noteSelection && (
+                <AnnotationQuote
+                  quote={noteSelection.text}
+                  location={noteSelection.location}
+                />
+              )}
+            </blockquote>
+            <Textarea
+              autoFocus
+              placeholder={
+                noteKind === "question" ? "想弄清楚什么？" : "批注内容…"
+              }
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            {noteKind === "question" ? (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => void annotate("question", note)}
+                  disabled={noteSaving || !note.trim()}
+                >
+                  <Check />
+                  保存问题
+                </Button>
+                {!editingAnnotation && (
+                  <Button
+                    className="flex-1"
+                    disabled={noteSaving || !note.trim() || !provider}
+                    onClick={() =>
+                      void annotate("question", note).then((saved) => {
+                        if (saved) void answerQuestion(saved);
+                      })
+                    }
+                  >
+                    <Sparkles />
+                    保存并让 AI 回答
+                  </Button>
+                )}
+              </div>
+            ) : (
               <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => void annotate("question", note)}
-                disabled={noteSaving || !note.trim()}
+                onClick={() => void annotate("note", note)}
+                disabled={
+                  noteSaving ||
+                  (!note.trim() && !editingAnnotation?.note.trim())
+                }
               >
                 <Check />
-                保存问题
+                保存批注
               </Button>
-              {!editingAnnotation && (
-                <Button
-                  className="flex-1"
-                  disabled={noteSaving || !note.trim() || !provider}
-                  onClick={() =>
-                    void annotate("question", note).then((saved) => {
-                      if (saved) void answerQuestion(saved);
-                    })
-                  }
-                >
-                  <Sparkles />
-                  保存并让 AI 回答
-                </Button>
-              )}
-            </div>
-          ) : (
-            <Button
-              onClick={() => void annotate("note", note)}
-              disabled={
-                noteSaving || (!note.trim() && !editingAnnotation?.note.trim())
-              }
-            >
-              <Check />
-              保存批注
-            </Button>
-          )}
-        </DialogContent>
-      </Dialog>
-      {exportingNotes && (
-        <ExportDocumentDialog
-          key={`export-${doc.id}`}
-          document={doc}
-          annotations={annotations}
-          messages={chat.messages}
-          link={(a) => readerLink({ id: doc.id, annotation: a.id })}
-          onClose={() => setExportingNotes(false)}
+            )}
+          </DialogContent>
+        </Dialog>
+        {exportingNotes && (
+          <ExportDocumentDialog
+            key={`export-${doc.id}`}
+            document={doc}
+            annotations={annotations}
+            messages={chat.messages}
+            link={(a) => readerLink({ id: doc.id, annotation: a.id })}
+            onClose={() => setExportingNotes(false)}
+          />
+        )}
+        <DocumentOverviewDialog
+          key={doc.id}
+          document={overviewOpen ? doc : null}
+          onClose={() => setOverviewOpen(false)}
+          onNavigate={async (location) => {
+            await adapter?.goTo(location);
+          }}
         />
-      )}
-      <DocumentOverviewDialog
-        key={doc.id}
-        document={overviewOpen ? doc : null}
-        onClose={() => setOverviewOpen(false)}
-        onNavigate={async (location) => {
-          await adapter?.goTo(location);
-        }}
-      />
-      <ProcessingUsageDialog
-        document={usageOpen ? doc : null}
-        onClose={() => setUsageOpen(false)}
-      />
-    </div>
+        <ProcessingUsageDialog
+          document={usageOpen ? doc : null}
+          onClose={() => setUsageOpen(false)}
+        />
+      </div>
+    </OverlayContainerContext.Provider>
   );
 }

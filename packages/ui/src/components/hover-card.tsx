@@ -1,6 +1,7 @@
 "use client";
 
 import { PreviewCard as PreviewCardPrimitive } from "@base-ui/react/preview-card";
+import { useOverlayPortal } from "@reader/ui/lib/overlay-container";
 import { cn } from "@reader/ui/lib/utils";
 
 function HoverCard({ ...props }: PreviewCardPrimitive.Root.Props) {
@@ -25,8 +26,9 @@ function HoverCardContent({
     PreviewCardPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  const portal = useOverlayPortal();
   return (
-    <PreviewCardPrimitive.Portal data-slot="hover-card-portal">
+    <PreviewCardPrimitive.Portal data-slot="hover-card-portal" {...portal}>
       <PreviewCardPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

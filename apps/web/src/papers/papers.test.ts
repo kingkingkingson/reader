@@ -13,6 +13,7 @@ import {
   wasOpened,
 } from "./format";
 import {
+  categoryDropPath,
   categoryTree,
   defaultColumns,
   cleanCategory,
@@ -273,6 +274,21 @@ it("moves, renames and removes a category with its subcategories", () => {
     hidden: [],
     collapsed: ["B"],
   });
+  expect(categoryDropPath("A", "B")).toBe("B/A");
+  expect(categoryDropPath("A/x", "B")).toBe("B/x");
+  expect(categoryDropPath("A/x/y", "B")).toBe("B/y");
+  expect(categoryDropPath("A/x", "")).toBe("x");
+  expect(categoryDropPath("A/x", "A")).toBe("");
+  expect(categoryDropPath("A", "A/x")).toBe("");
+  expect(categoryDropPath("A", "A")).toBe("");
+  expect(categoryDropPath("A", "")).toBe("");
+  expect(categoryDropPath("ML/Vision", "ml")).toBe("");
+  expect(categoryDropPath("A", "b".repeat(40))).toBe("");
+  expect(paperCategories({ categories: ["A", "B/x", "B"] }, [])).toEqual([
+    "A",
+    "B",
+    "B/x",
+  ]);
 });
 
 it("groups probable duplicates by identifier or title", () => {

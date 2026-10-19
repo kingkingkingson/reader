@@ -194,7 +194,15 @@ kbd {
 }
 .app-body {
   display: flex;
+  position: relative;
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.library-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
   min-width: 0;
   min-height: 0;
 }
@@ -533,11 +541,16 @@ kbd {
   font-size: 12px;
 }
 .workspace {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.library-shell[data-hidden],
+.workspace[data-hidden] {
+  visibility: hidden;
 }
 .reader-chrome {
   flex-shrink: 0;
@@ -1024,17 +1037,19 @@ kbd {
   color: var(--muted-foreground);
   padding: 8px 0 22px;
 }
-.suggestion {
+.chat-empty .suggestion {
   width: 100%;
   justify-content: flex-start;
   height: 39px;
   margin-bottom: 9px;
-  font-size: 11px;
+  font-size: 22px;
+  line-height: 1;
   font-weight: 400;
   gap: 9px;
 }
-.suggestion svg {
-  width: 13px;
+.chat-empty .suggestion svg:not([class*="size-"]) {
+  width: 20px;
+  height: 20px;
 }
 .privacy-note {
   font-size: 10px;
@@ -2486,6 +2501,13 @@ kbd {
   font-size: 11px;
   font-weight: 500;
   color: var(--muted-foreground);
+}
+.paper-nav-heading[data-drop-over] {
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--primary) 35%, transparent);
 }
 .nav-item.paper-nav-item {
   height: 32px;

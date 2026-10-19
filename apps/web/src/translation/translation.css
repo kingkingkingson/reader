@@ -82,14 +82,42 @@
     outline-color 180ms ease-out,
     box-shadow 180ms ease-out;
 }
-.translation-document [data-label="doc_title"] {
+.translation-document [data-label="doc_title"]:not([data-heading]) {
   font-size: 1.45em;
   font-weight: 600;
 }
-.translation-document [data-label="paragraph_title"] {
+.translation-document [data-label="paragraph_title"]:not([data-heading]) {
   font-size: 1.15em;
   font-weight: 600;
   margin-top: 1.8em;
+}
+.translation-document [data-heading] {
+  font-weight: 640;
+  line-height: 1.35;
+  margin-bottom: 0.4em;
+}
+.translation-document [data-heading="1"] {
+  font-size: 1.6em;
+  margin-top: 0.15em;
+}
+.translation-document [data-heading="2"] {
+  font-size: 1.34em;
+  margin-top: 1.7em;
+}
+.translation-document [data-heading="3"] {
+  font-size: 1.16em;
+  margin-top: 1.35em;
+}
+.translation-document [data-heading="4"] {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin-top: 1.15em;
+}
+.translation-document [data-heading="5"],
+.translation-document [data-heading="6"] {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 1em;
 }
 .translation-sentence,
 .translation-sentence > .message-markdown,
@@ -99,6 +127,58 @@
 }
 .translation-sentence::after {
   content: " ";
+}
+.translation-document [data-prompt] {
+  margin: 0.7em auto 0;
+  padding: 0.35em 0.9em;
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-width: 0 1px;
+  background: color-mix(in srgb, var(--foreground) 4.5%, transparent);
+}
+.translation-document [data-prompt] + [data-prompt] {
+  margin-top: 0;
+}
+.translation-document [data-prompt]:not([data-prompt] + [data-prompt]) {
+  margin-top: 0.9em;
+  padding-top: 0.75em;
+  border-top-width: 1px;
+  border-radius: 8px 8px 0 0;
+}
+.translation-document [data-prompt]:not(:has(+ [data-prompt])) {
+  margin-bottom: 1.15em;
+  padding-bottom: 0.8em;
+  border-bottom-width: 1px;
+  border-radius: 0 0 8px 8px;
+}
+.translation-document
+  [data-prompt]:not([data-prompt] + [data-prompt]):not(:has(+ [data-prompt])) {
+  border-radius: 8px;
+}
+.translation-document [data-prompt] .translation-sentence,
+.translation-document [data-prompt] .translation-sentence > .message-markdown,
+.translation-document
+  [data-prompt]
+  .translation-sentence
+  > .message-markdown
+  > p {
+  display: block;
+  margin: 0.45em 0 0;
+}
+.translation-document [data-prompt] .translation-sentence:first-child,
+.translation-document
+  [data-prompt]
+  .translation-sentence:first-child
+  > .message-markdown,
+.translation-document
+  [data-prompt]
+  .translation-sentence:first-child
+  > .message-markdown
+  > p {
+  margin-top: 0;
+}
+.translation-document [data-prompt] .translation-sentence::after {
+  content: none;
 }
 .translation-sentence[data-linked] {
   background: color-mix(in srgb, var(--primary) 13%, transparent);

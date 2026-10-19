@@ -4405,6 +4405,8 @@ export interface components {
             id: string;
             label: string;
             text: string;
+            /** @description Heading rank copied from an h1–h6 element. */
+            level?: number;
             location: components["schemas"]["EPUBLocation"];
             image?: string;
         };

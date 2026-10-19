@@ -2,6 +2,10 @@
 
 import * as React from "react";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import {
+  useOverlayContainer,
+  useOverlayPortal,
+} from "@reader/ui/lib/overlay-container";
 import { cn } from "@reader/ui/lib/utils";
 
 import { CheckIcon, ChevronRightIcon } from "lucide-react";
@@ -10,8 +14,18 @@ function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }
 
-function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
-  return <MenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />;
+function DropdownMenuPortal({
+  container,
+  ...props
+}: MenuPrimitive.Portal.Props) {
+  const overlay = useOverlayContainer();
+  return (
+    <MenuPrimitive.Portal
+      data-slot="dropdown-menu-portal"
+      container={container ?? overlay ?? undefined}
+      {...props}
+    />
+  );
 }
 
 function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
@@ -30,8 +44,9 @@ function DropdownMenuContent({
     MenuPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  const portal = useOverlayPortal();
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal {...portal}>
       <MenuPrimitive.Positioner
         className="isolate z-50 outline-none"
         align={align}

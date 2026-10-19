@@ -9,19 +9,18 @@ export interface ReleaseItem {
 }
 
 /**
- * Notes keyed by the desktop package version. Versions without notes still
- * show the update confirmation and GitHub feedback actions.
+ * Notes keyed by the desktop package version. The app does not open them on
+ * startup; the preview can still show a version's notes.
  */
 export const releaseNotes: Record<string, ReleaseItem[]> = bundledReleaseNotes;
 
 export type GuideLaunch =
-  | { kind: "onboarding" }
-  | { kind: "release"; items: ReleaseItem[] }
-  | { kind: "none"; save?: GuidePreferences };
+  { kind: "onboarding" } | { kind: "none"; save?: GuidePreferences };
 
 /**
- * Decides what to show at startup. Libraries created before the guide existed
- * count as onboarded, so existing users see release notes instead.
+ * Decides what to show at startup. A new empty library gets onboarding.
+ * Later launches, including the first launch of an existing library and each
+ * update, stay on the library and only record the current version.
  */
 export function guideLaunch(
   preferences: GuidePreferences,
@@ -29,9 +28,10 @@ export function guideLaunch(
   hasDocuments: boolean,
 ): GuideLaunch {
   if (!preferences.onboarded && !hasDocuments) return { kind: "onboarding" };
-  if (preferences.seenVersion === version)
-    return preferences.onboarded
-      ? { kind: "none" }
-      : { kind: "none", save: { ...preferences, onboarded: true } };
-  return { kind: "release", items: releaseNotes[version] ?? [] };
+  if (preferences.onboarded && preferences.seenVersion === version)
+    return { kind: "none" };
+  return {
+    kind: "none",
+    save: { ...preferences, onboarded: true, seenVersion: version },
+  };
 }

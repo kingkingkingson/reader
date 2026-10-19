@@ -12,6 +12,7 @@ import {
   useReaderStore,
 } from "../store";
 import {
+  categoryLeaf,
   cleanCategory,
   paperCategories,
   removeCategoryPreferences,
@@ -82,6 +83,24 @@ export function addToCategory(docs: Document[], name: string) {
       .filter((doc) => !inFolder(doc, name))
       .map((doc) => [doc, { folders: [...doc.folders, name] }]),
   );
+}
+
+/** The open paper category, when the library itself is showing. */
+export function currentPaperFolder() {
+  if (useReaderStore.getState().active) return "";
+  const view = usePaperUI.getState().view;
+  return view.startsWith("folder:") ? view.slice(7) : "";
+}
+
+/** File newly imported papers into the category open when the import started. */
+export async function fileImportedPapers(
+  docs: Document[],
+  folder = currentPaperFolder(),
+) {
+  const papers = docs.filter((doc) => doc.library === "papers");
+  if (!folder || !papers.length) return "";
+  await addToCategory(papers, folder);
+  return categoryLeaf(folder);
 }
 export function removeFromCategory(docs: Document[], name: string) {
   return patchPapers(
@@ -175,6 +194,33 @@ function followCategory(from: string, to?: string) {
       ? "all"
       : (`folder:${to}${current.slice(from.length)}` as PaperView),
   );
+}
+
+/** Move `from` under `onto` (or to the top level when `onto` is empty). */
+export async function nestCategory(from: string, onto: string) {
+  const leaf = categoryLeaf(from);
+  const next = cleanCategory(onto ? `${onto}/${leaf}` : leaf);
+  if (
+    !leaf ||
+    next.toLowerCase() === from.toLowerCase() ||
+    (onto && withinCategory(onto, from))
+  )
+    return false;
+  const ok = await renameCategory(from, next);
+  if (
+    ok &&
+    onto &&
+    (paperPrefs().collapsed || []).some(
+      (item) => item.toLowerCase() === onto.toLowerCase(),
+    )
+  )
+    await savePaperPreferences((prefs) => ({
+      ...prefs,
+      collapsed: (prefs.collapsed || []).filter(
+        (item) => item.toLowerCase() !== onto.toLowerCase(),
+      ),
+    }));
+  return ok;
 }
 
 /** Rename a category; its subcategories move with it. */

@@ -21,7 +21,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"golang.org/x/sync/singleflight"
 
@@ -223,17 +222,7 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
-		if value, exists := v["translationGlossary"]; exists {
-			text, ok := value.(string)
-			if !ok {
-				fail(w, 400, "翻译术语说明必须为文本")
-				return
-			}
-			if utf8.RuneCountInString(text) > translationGlossaryLimit {
-				fail(w, 400, "翻译术语说明不能超过 4000 字")
-				return
-			}
-		}
+		delete(v, "translationGlossary")
 		if value, exists := v["autoTranslateMaxPages"]; exists {
 			n, ok := value.(float64)
 			if !ok || n < 0 || n > 150 || n != float64(int(n)) || int(n)%10 != 0 {

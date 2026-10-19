@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import { useOverlayPortal } from "@reader/ui/lib/overlay-container";
 import { cn } from "@reader/ui/lib/utils";
 
 function Popover({ ...props }: PopoverPrimitive.Root.Props) {
@@ -25,8 +26,9 @@ function PopoverContent({
     PopoverPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
   >) {
+  const portal = useOverlayPortal();
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal {...portal}>
       <PopoverPrimitive.Positioner
         anchor={anchor}
         align={align}

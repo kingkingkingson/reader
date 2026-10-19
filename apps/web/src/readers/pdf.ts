@@ -210,12 +210,21 @@ export class PDFReaderAdapter implements ReaderAdapter {
       passive: true,
     });
     this.resize = new ResizeObserver(() => {
-      viewer.style.paddingBottom = `${container.clientHeight / 2}px`;
-      this.clearSelection();
+      const hidden = !!container.closest("[data-hidden]");
+      if (container.clientHeight > 0)
+        viewer.style.paddingBottom = `${container.clientHeight / 2}px`;
+      if (!hidden) this.clearSelection();
       clearTimeout(this.resizeTimer);
       const fit = () => {
-        if (container.closest("[inert]")) return;
-        if (!this.disposed && this.pdf && this.fitWidth)
+        // A background tab stays inert, but still needs to follow the window.
+        if (!container.closest("[data-hidden]") && container.closest("[inert]"))
+          return;
+        if (
+          !this.disposed &&
+          this.pdf &&
+          this.fitWidth &&
+          container.clientWidth > 0
+        )
           this.viewer.currentScaleValue = "page-width";
       };
       // Refit once the sidebar settles, not on every animation frame.
@@ -411,8 +420,11 @@ export class PDFReaderAdapter implements ReaderAdapter {
     this.clearSelection();
     this.processNextDarkPage();
   };
+  private backgrounded() {
+    return !!this.container.closest("[data-hidden]");
+  }
   private onPointerDown = (event: PointerEvent) => {
-    if (isSelectionToolbar(event.target)) return;
+    if (this.backgrounded() || isSelectionToolbar(event.target)) return;
     this.locationHighlight.clear();
     this.events.annotation?.(null);
     this.pointer = undefined;
@@ -422,6 +434,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
     else this.clearSelection();
   };
   private onKeyDown = (event: KeyboardEvent) => {
+    if (this.backgrounded()) return;
     this.selecting = false;
     this.pointer = undefined;
     if (event.key === "Escape") this.clearSelection();
@@ -516,6 +529,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
     this.wheelAppliedScale = this.viewer.currentScale;
   };
   private onMouseUp = (event: MouseEvent) => {
+    if (this.backgrounded()) return;
     this.selecting = false;
     if (!isSelectionToolbar(event.target)) {
       // A double click selects the whole sentence instead of one word.
@@ -530,6 +544,7 @@ export class PDFReaderAdapter implements ReaderAdapter {
     }
   };
   private onSelectionChange = () => {
+    if (this.backgrounded()) return;
     if (!this.selecting) this.onSelection();
   };
   private onSelection = () => {

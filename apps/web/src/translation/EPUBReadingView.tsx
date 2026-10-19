@@ -1,4 +1,6 @@
 import { annotationsInRects, sentenceRectsAtPoint } from "./annotation-hover";
+import { translationHeadingLevel } from "./heading";
+import { isPromptText } from "./prompt-block";
 import { useTranslations } from "./useTranslations";
 import {
   useEffect,
@@ -590,39 +592,46 @@ export function EPUBReadingView({
                       : "正在读取正文段落…")}
                 </p>
               )}
-              {visible.map((block) => (
-                <section
-                  key={block.id}
-                  data-translation-block={block.id}
-                  data-label={block.label}
-                  data-chapter={block.location.href}
-                >
-                  <TranslationText
-                    block={block}
-                    imageURL={
-                      block.image
-                        ? publicationURL(doc.id, block.image)
-                        : undefined
+              {visible.map((block) => {
+                const prompt = isPromptText(block.text);
+                return (
+                  <section
+                    key={block.id}
+                    data-translation-block={block.id}
+                    data-label={block.label}
+                    data-heading={
+                      prompt ? undefined : translationHeadingLevel(block)
                     }
-                    documentId={doc.id}
-                    translation={translations.find(
-                      (t) => t.blockId === block.id,
-                    )}
-                    paused={processing?.enabled === false}
-                    retry={() => retry(block.id)}
-                    retranslate={() => retry(block.id, true)}
-                    onSave={async (index, target) => {
-                      await api.saveTranslationSentence(
-                        doc.id,
-                        block.id,
-                        index,
-                        target,
-                      );
-                    }}
-                    linked={linked[block.id]}
-                  />
-                </section>
-              ))}
+                    data-prompt={prompt || undefined}
+                    data-chapter={block.location.href}
+                  >
+                    <TranslationText
+                      block={block}
+                      imageURL={
+                        block.image
+                          ? publicationURL(doc.id, block.image)
+                          : undefined
+                      }
+                      documentId={doc.id}
+                      translation={translations.find(
+                        (t) => t.blockId === block.id,
+                      )}
+                      paused={processing?.enabled === false}
+                      retry={() => retry(block.id)}
+                      retranslate={() => retry(block.id, true)}
+                      onSave={async (index, target) => {
+                        await api.saveTranslationSentence(
+                          doc.id,
+                          block.id,
+                          index,
+                          target,
+                        );
+                      }}
+                      linked={linked[block.id]}
+                    />
+                  </section>
+                );
+              })}
             </div>
           }
         />

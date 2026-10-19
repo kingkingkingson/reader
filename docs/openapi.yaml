@@ -6100,6 +6100,13 @@
                   "id": { "type": "string" },
                   "label": { "type": "string" },
                   "text": { "type": "string" },
+                  "level":
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 6,
+                      "description": "Heading rank copied from an h1–h6 element.",
+                    },
                   "location": { "$ref": "#/components/schemas/EPUBLocation" },
                   "image": { "type": "string" },
                 },

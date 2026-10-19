@@ -1,6 +1,7 @@
 "use client";
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import { useOverlayPortal } from "@reader/ui/lib/overlay-container";
 import { cn } from "@reader/ui/lib/utils";
 
 function TooltipProvider({
@@ -37,8 +38,9 @@ function TooltipContent({
     TooltipPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  const portal = useOverlayPortal();
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal {...portal}>
       <TooltipPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

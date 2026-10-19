@@ -7,6 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { translationHeadingLevel } from "./heading";
+import { isPromptText } from "./prompt-block";
 import { useTranslations } from "./useTranslations";
 import { createPortal } from "react-dom";
 import { Crosshair } from "lucide-react";
@@ -910,85 +912,85 @@ export function PDFReadingView({
       {autoCenterHost && createPortal(autoCenterButton, autoCenterHost)}
       {toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar}
       <div className="translation-stage" data-covered={noteOpen}>
-      {mode === "translation" && (
-        <div className="pdf-reading-controls">
-          <div className="pdf-page-navigation">{pageNavigation}</div>
-        </div>
-      )}
-      <TranslationPanes
-        mode={mode}
-        swapped={swapped}
-        onSwap={() => setSwapped((value) => !value)}
-        source={
-          <div
-            className="translation-source"
-            inert={mode === "translation"}
-            onWheelCapture={() => input("source")}
-            onPointerDownCapture={() => input("source")}
-            onKeyDownCapture={() => input("source")}
-          >
-            <ReaderView
-              document={doc}
-              theme={theme}
-              annotations={annotations.filter(
-                (a) => a.location.type !== "pdf" || !a.location.translation,
-              )}
-              blocks={blocks}
-              onReady={ready}
-              events={{
-                ...events,
-                selection: sourceSelection,
-                blockFocus: (block) => {
-                  void focusBlock(block, "source");
-                },
-                location: (location, percentage) => {
-                  if (
-                    state.current.mode !== "translation" &&
-                    side.current === "source"
-                  )
-                    events.location(location, percentage);
-                },
-                readingAnchor: (anchor) => {
-                  if (
-                    explicitFocus.current.moving ||
-                    !control.current.canFollow("source") ||
-                    selecting.current
-                  )
-                    return;
-                  recordReading(anchor);
-                  if (
-                    state.current.mode === "parallel" &&
-                    syncEnabledRef.current
-                  )
-                    followTranslation(anchor);
-                },
-                blockHover: (block) => {
-                  if (mode === "parallel") hover("source", block?.id);
-                },
-                blockAction: (block, action) => {
-                  if (action !== "translate") {
-                    events.blockAction?.(block, action);
-                    return;
-                  }
-                  const button = root.current?.querySelector<HTMLElement>(
-                    `[data-block-id="${block.id}"] [data-block-action="translate"]`,
-                  );
-                  setPopup({
-                    block,
-                    rect:
-                      button?.getBoundingClientRect() ??
-                      root.current!.getBoundingClientRect(),
-                  });
-                },
-              }}
-            />
-            {mode !== "translation" && (
-              <div className="pdf-reading-controls">
-                <div className="pdf-page-navigation">{pageNavigation}</div>
-              </div>
-            )}
+        {mode === "translation" && (
+          <div className="pdf-reading-controls">
+            <div className="pdf-page-navigation">{pageNavigation}</div>
           </div>
-        }
+        )}
+        <TranslationPanes
+          mode={mode}
+          swapped={swapped}
+          onSwap={() => setSwapped((value) => !value)}
+          source={
+            <div
+              className="translation-source"
+              inert={mode === "translation"}
+              onWheelCapture={() => input("source")}
+              onPointerDownCapture={() => input("source")}
+              onKeyDownCapture={() => input("source")}
+            >
+              <ReaderView
+                document={doc}
+                theme={theme}
+                annotations={annotations.filter(
+                  (a) => a.location.type !== "pdf" || !a.location.translation,
+                )}
+                blocks={blocks}
+                onReady={ready}
+                events={{
+                  ...events,
+                  selection: sourceSelection,
+                  blockFocus: (block) => {
+                    void focusBlock(block, "source");
+                  },
+                  location: (location, percentage) => {
+                    if (
+                      state.current.mode !== "translation" &&
+                      side.current === "source"
+                    )
+                      events.location(location, percentage);
+                  },
+                  readingAnchor: (anchor) => {
+                    if (
+                      explicitFocus.current.moving ||
+                      !control.current.canFollow("source") ||
+                      selecting.current
+                    )
+                      return;
+                    recordReading(anchor);
+                    if (
+                      state.current.mode === "parallel" &&
+                      syncEnabledRef.current
+                    )
+                      followTranslation(anchor);
+                  },
+                  blockHover: (block) => {
+                    if (mode === "parallel") hover("source", block?.id);
+                  },
+                  blockAction: (block, action) => {
+                    if (action !== "translate") {
+                      events.blockAction?.(block, action);
+                      return;
+                    }
+                    const button = root.current?.querySelector<HTMLElement>(
+                      `[data-block-id="${block.id}"] [data-block-action="translate"]`,
+                    );
+                    setPopup({
+                      block,
+                      rect:
+                        button?.getBoundingClientRect() ??
+                        root.current!.getBoundingClientRect(),
+                    });
+                  },
+                }}
+              />
+              {mode !== "translation" && (
+                <div className="pdf-reading-controls">
+                  <div className="pdf-page-navigation">{pageNavigation}</div>
+                </div>
+              )}
+            </div>
+          }
           translation={
             mode !== "source" && (
               <div
@@ -1096,12 +1098,17 @@ export function PDFReadingView({
                             .flatMap((r) => r.sentenceIndexes)
                         : [];
                     });
+                  const prompt = isPromptText(block.text);
                   return (
                     <section
                       key={block.id}
                       data-translation-block={block.id}
                       data-block-kind={block.image ? "image" : "text"}
                       data-label={block.label}
+                      data-heading={
+                        prompt ? undefined : translationHeadingLevel(block)
+                      }
+                      data-prompt={prompt || undefined}
                       data-hovered={hoveredBlock === block.id || undefined}
                       data-focused={focusedBlock === block.id || undefined}
                       data-search-hit={

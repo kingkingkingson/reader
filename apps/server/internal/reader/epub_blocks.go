@@ -31,6 +31,7 @@ type EPUBReadingBlock struct {
 	Label    string              `json:"label"`
 	Text     string              `json:"text"`
 	Image    string              `json:"image,omitempty"`
+	Level    int                 `json:"level,omitempty"`
 	Location EPUBReadingLocation `json:"location"`
 }
 type epubTranslationDocument []EPUBReadingBlock
@@ -170,6 +171,7 @@ func parseEPUBChapter(href, source string, mark func(EPUBReadingBlock, []*html.N
 	measure(body)
 	nodes := []*html.Node{}
 	label := "text"
+	level := 0
 	flush := func() {
 		first, last := 0, len(nodes)-1
 		for first <= last && strings.TrimSpace(nodes[first].Data) == "" {
@@ -201,7 +203,7 @@ func parseEPUBChapter(href, source string, mark func(EPUBReadingBlock, []*html.N
 		loc, _ := json.Marshal(map[string]any{"href": href, "type": "application/xhtml+xml", "locations": map[string]any{"textRange": map[string]int{"start": offsets[startNode] + utf16Length(startNode.Data[:prefix]), "end": offsets[endNode] + utf16Length(endNode.Data[:end])}, "domRange": map[string]any{"start": startPoint, "end": endPoint}}, "text": map[string]string{"highlight": quote}})
 		key, _ := json.Marshal([]any{href, startPoint, endPoint})
 		sum := sha256.Sum256(key)
-		out = append(out, EPUBReadingBlock{ID: "e-" + hex.EncodeToString(sum[:16]), Label: label, Text: quote, Location: EPUBReadingLocation{Type: "epub", Href: href, Locator: string(loc), Quote: quote}})
+		out = append(out, EPUBReadingBlock{ID: "e-" + hex.EncodeToString(sum[:16]), Label: label, Text: quote, Level: level, Location: EPUBReadingLocation{Type: "epub", Href: href, Locator: string(loc), Quote: quote}})
 		b := &out[len(out)-1]
 		b.Location.BlockID, b.Location.End = b.ID, utf16Length(b.Text)
 		mark(*b, nodes[first:last+1])
@@ -251,13 +253,13 @@ func parseEPUBChapter(href, source string, mark func(EPUBReadingBlock, []*html.N
 		case "p", "div", "section", "article", "aside", "li", "ul", "ol", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "table", "tr", "td", "th", "figcaption", "figure", "br":
 			block = true
 		}
-		previousLabel := label
+		previousLabel, previousLevel := label, level
 		if block {
 			flush()
-			if len(n.Data) == 2 && n.Data[0] == 'h' {
+			label, level = "text", 0
+			if len(n.Data) == 2 && n.Data[0] == 'h' && n.Data[1] >= '1' && n.Data[1] <= '6' {
 				label = "paragraph_title"
-			} else {
-				label = "text"
+				level = int(n.Data[1] - '0')
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -265,7 +267,7 @@ func parseEPUBChapter(href, source string, mark func(EPUBReadingBlock, []*html.N
 		}
 		if block {
 			flush()
-			label = previousLabel
+			label, level = previousLabel, previousLevel
 		}
 	}
 	walk(body)

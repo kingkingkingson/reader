@@ -20,6 +20,7 @@ import {
   Trash2,
   BookOpenText,
 } from "lucide-react";
+import { openExternalLink } from "./reading-links";
 import { version } from "../../desktop/package.json";
 import { api, RequestError } from "@reader/api";
 import {
@@ -51,6 +52,7 @@ import {
 import { TrashView } from "./TrashView";
 import { PaperLibrary } from "./papers/PaperLibrary";
 import { PaperSidebar } from "./papers/PaperSidebar";
+import { currentPaperFolder, fileImportedPapers } from "./papers/actions";
 import { usePaperUI } from "./papers/state";
 import { ImportPaperDialog } from "./papers/ImportPaperDialog";
 import { LibraryModeSwitcher, libraryModes } from "./LibraryModeSwitcher";
@@ -65,6 +67,9 @@ import { LibraryDocuments } from "./LibraryDocuments";
 import { filterDocuments, initialFilters } from "./library";
 import { GuideHost } from "./guide/GuideHost";
 import { flushProgress } from "./progress";
+import { OverlayContainerContext } from "@reader/ui/lib/overlay-container";
+
+const releasePage = "https://github.com/kingkingkingson/reader/releases/latest";
 const currentMode = () =>
   libraryMode(useReaderStore.getState().libraryPreferences);
 export function App() {
@@ -90,7 +95,6 @@ export function App() {
     [jobs],
   );
   const [settings, setSettings] = useState(false);
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [about, setAbout] = useState(false);
   const [guide, setGuide] = useState(false);
   const [filter, setFilter] = useState("all");
@@ -110,6 +114,7 @@ export function App() {
   useShortcut("libraryLeft", () => setNav((value) => !value), !active);
   useShortcut("search", () => setCommand(true), !active);
   const fileRef = useRef<HTMLInputElement>(null);
+  const libraryOverlay = useRef<HTMLDivElement>(null);
   const hydrated = useRef(false);
   useEffect(() => {
     Promise.all([
@@ -180,9 +185,12 @@ export function App() {
       const desktop = papers.flatMap((p) => (p.id ? [p.id] : []));
       if (desktop.length)
         await window.readerDesktop?.importLargePapers(desktop, library);
+      const importedDocs: Document[] = [];
       for (const paper of papers)
-        if (paper.file) await api.import(paper.file, library, true);
+        if (paper.file)
+          importedDocs.push(await api.import(paper.file, library, true));
       await refreshLibrary();
+      if (library === "papers") await fileImportedPapers(importedDocs);
       toast.success(
         `已导入 ${papers.length} 个文件到${libraryModes[library].label}`,
       );
@@ -244,27 +252,38 @@ export function App() {
           : "仅支持 EPUB 和 PDF，已跳过其他文件",
       );
     if (!accepted.length) return;
+    const folder = target === "papers" ? currentPaperFolder() : "";
     setBusy(true);
     try {
       const elsewhere: Document[] = [];
+      const importedDocs: Document[] = [];
       const large: LargePaper[] = [];
       for (const file of accepted) {
         try {
           const document = await api.import(file, target);
           if (document.library !== target) elsewhere.push(document);
+          else importedDocs.push(document);
         } catch (e) {
           if (!(e instanceof RequestError) || e.code !== "large-paper") throw e;
           large.push({ name: file.name, pages: e.pages ?? 0, file });
         }
       }
       await refreshLibrary();
+      const filed = folder
+        ? await fileImportedPapers(importedDocs, folder)
+        : "";
       setLargePapers(large);
       if (elsewhere.length)
         toast.info(
           `${elsewhere.length} 个文件已在${libraryModes[elsewhere[0].library].label}中，可在那里移动`,
         );
-      const imported = accepted.length - elsewhere.length - large.length;
-      if (imported > 0) toast.success(`已导入 ${imported} 个文件`);
+      const imported = importedDocs.length;
+      if (imported > 0)
+        toast.success(
+          filed
+            ? `已导入 ${imported} 个文件到「${filed}」`
+            : `已导入 ${imported} 个文件`,
+        );
       setError("");
     } catch (e) {
       toast.error((e as Error).message);
@@ -447,16 +466,14 @@ export function App() {
           </div>
         </header>
         <div className="app-body">
-          {active ? (
-            <Workspace
-              key={active.id}
-              document={active}
-              theme={resolvedTheme}
-              processing={jobs.find((job) => job.documentId === active.id)}
-              onSettings={() => setSettings(true)}
-            />
-          ) : (
-            <>
+          <div
+            ref={libraryOverlay}
+            className="library-shell"
+            data-hidden={active ? true : undefined}
+            inert={!!active}
+            aria-hidden={active ? true : undefined}
+          >
+            <OverlayContainerContext.Provider value={libraryOverlay}>
               {/* Outside the sidebar, which is transformed while collapsed. */}
               <div className="window-top-drag" aria-hidden="true" />
               <aside
@@ -764,8 +781,18 @@ export function App() {
                   </div>
                 </main>
               )}
-            </>
-          )}
+            </OverlayContainerContext.Provider>
+          </div>
+          {tabs.map((tab) => (
+            <Workspace
+              key={tab.id}
+              document={tab}
+              active={tab.id === active?.id}
+              theme={resolvedTheme}
+              processing={jobs.find((job) => job.documentId === tab.id)}
+              onSettings={() => setSettings(true)}
+            />
+          ))}
         </div>
         {editing && (
           <DocumentEditor
@@ -803,21 +830,15 @@ export function App() {
               <dt className="text-muted-foreground">版本</dt>
               <dd>{version}</dd>
             </dl>
-            {window.readerDesktop?.checkForUpdates && (
-              <Button
-                variant="outline"
-                disabled={checkingUpdates}
-                onClick={() => {
-                  setCheckingUpdates(true);
-                  void window
-                    .readerDesktop!.checkForUpdates()
-                    .catch((error) => toast.error(String(error)))
-                    .finally(() => setCheckingUpdates(false));
-                }}
-              >
-                {checkingUpdates ? "正在检查或下载…" : "检查更新"}
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                openExternalLink(releasePage);
+                setAbout(false);
+              }}
+            >
+              检查更新
+            </Button>
           </DialogContent>
         </Dialog>
         <Dialog open={command} onOpenChange={setCommand}>

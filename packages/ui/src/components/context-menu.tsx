@@ -2,6 +2,10 @@
 
 import * as React from "react";
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
+import {
+  useOverlayContainer,
+  useOverlayPortal,
+} from "@reader/ui/lib/overlay-container";
 import { cn } from "@reader/ui/lib/utils";
 
 import { CheckIcon, ChevronRightIcon } from "lucide-react";
@@ -10,9 +14,17 @@ function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
   return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />;
 }
 
-function ContextMenuPortal({ ...props }: ContextMenuPrimitive.Portal.Props) {
+function ContextMenuPortal({
+  container,
+  ...props
+}: ContextMenuPrimitive.Portal.Props) {
+  const overlay = useOverlayContainer();
   return (
-    <ContextMenuPrimitive.Portal data-slot="context-menu-portal" {...props} />
+    <ContextMenuPrimitive.Portal
+      data-slot="context-menu-portal"
+      container={container ?? overlay ?? undefined}
+      {...props}
+    />
   );
 }
 
@@ -41,8 +53,9 @@ function ContextMenuContent({
     ContextMenuPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) {
+  const portal = useOverlayPortal();
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal {...portal}>
       <ContextMenuPrimitive.Positioner
         className="isolate z-50 outline-none"
         align={align}

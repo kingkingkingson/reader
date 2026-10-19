@@ -5,6 +5,7 @@ import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog
 import { cn } from "@reader/ui/lib/utils";
 
 import { Button } from "@reader/ui/components/button";
+import { useOverlayContainer } from "@reader/ui/lib/overlay-container";
 
 function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
@@ -16,9 +17,17 @@ function AlertDialogTrigger({ ...props }: AlertDialogPrimitive.Trigger.Props) {
   );
 }
 
-function AlertDialogPortal({ ...props }: AlertDialogPrimitive.Portal.Props) {
+function AlertDialogPortal({
+  container,
+  ...props
+}: AlertDialogPrimitive.Portal.Props) {
+  const overlay = useOverlayContainer();
   return (
-    <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />
+    <AlertDialogPrimitive.Portal
+      data-slot="alert-dialog-portal"
+      container={container ?? overlay ?? undefined}
+      {...props}
+    />
   );
 }
 

@@ -100,6 +100,29 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+it("keeps the open reader mounted while its tab is inactive", async () => {
+  await act(async () => render(0));
+  const surface = host.querySelector(".workspace");
+  expect(surface?.hasAttribute("data-hidden")).toBe(false);
+  expect(surface?.hasAttribute("inert")).toBe(false);
+  await act(async () =>
+    root.render(
+      <TooltipProvider>
+        <Workspace
+          document={doc}
+          theme={defaultTheme}
+          processing={processing}
+          onSettings={() => {}}
+          active={false}
+        />
+      </TooltipProvider>,
+    ),
+  );
+  expect(host.querySelector(".workspace")).toBe(surface);
+  expect(surface?.hasAttribute("data-hidden")).toBe(true);
+  expect(surface?.hasAttribute("inert")).toBe(true);
+});
+
 it.each(["取消", "Close"])(
   "keeps one export dialog across progress refreshes and removes it with %s",
   async (close) => {

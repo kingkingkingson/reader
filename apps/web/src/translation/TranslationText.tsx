@@ -1,4 +1,5 @@
 import { FormulaRow } from "./FormulaRow";
+import { promptDisplay } from "./prompt-block";
 import type { PDFBlock, TranslationBlock } from "@reader/core";
 import { blockImageURL } from "@reader/api";
 import { Button } from "@reader/ui/components/button";
@@ -166,16 +167,16 @@ function TranslationContent({
       <>
         {retranslateButton}
         <Suspense
-        fallback={
-          <FormulaRow number={formulaNumber}>{formulaFallback}</FormulaRow>
-        }
-      >
-        <FormulaFragment
-          content={translation.formulaMarkdown}
-          fallback={formulaFallback}
-          number={formulaNumber}
-        />
-      </Suspense>
+          fallback={
+            <FormulaRow number={formulaNumber}>{formulaFallback}</FormulaRow>
+          }
+        >
+          <FormulaFragment
+            content={translation.formulaMarkdown}
+            fallback={formulaFallback}
+            number={formulaNumber}
+          />
+        </Suspense>
       </>
     );
   }
@@ -284,7 +285,12 @@ function TranslationContent({
                   }}
                 >
                   <MessageMarkdown
-                    content={sentence.target}
+                    content={promptDisplay(
+                      block.text,
+                      sentence.source,
+                      sentence.target,
+                      i,
+                    )}
                     blockId={block.id}
                     onCitation={onCitation}
                   />

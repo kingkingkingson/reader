@@ -327,8 +327,6 @@ export interface ReaderTheme {
   /** "sans-serif", "serif" or an installed font family name. */
   translationFontFamily?: string;
   linkTranslationAnnotations?: boolean;
-  /** Reader-authored terminology notes injected into translation prompts. */
-  translationGlossary?: string;
   translationFontWeight?: "normal" | "bold";
   /** The highlight palette, in order; the defaults apply when unset. */
   highlightColors?: HighlightColor[];
@@ -566,6 +564,8 @@ export interface EPUBReadingBlock {
   id: string;
   label: string;
   text: string;
+  /** Rank from the source h1–h6 element. */
+  level?: number;
   location: EPUBLocation;
 }
 export interface TranslationSentence {

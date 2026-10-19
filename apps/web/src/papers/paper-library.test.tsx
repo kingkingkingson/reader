@@ -1313,6 +1313,108 @@ it("does not save when a live drag returns to its original slot", async () => {
   expect(headerColumns()).toEqual(["title", "authors", "year"]);
 });
 
+it("reparents a category when it is dropped on another", async () => {
+  const nested = [
+    paper({ id: "a", title: "A", folders: ["ML/Vision"] }),
+    paper({ id: "b", title: "B", folders: ["NLP"] }),
+  ];
+  await act(async () =>
+    useReaderStore.setState({
+      documents: nested,
+      libraryPreferences: {
+        mode: "papers",
+        papers: { categories: ["ML", "ML/Vision", "NLP"] },
+      },
+    }),
+  );
+  await act(async () => root.render(<Harness />));
+  const payload = () => {
+    const values = new Map<string, string>();
+    return {
+      effectAllowed: "all",
+      dropEffect: "none",
+      types: [] as string[],
+      setData(type: string, value: string) {
+        values.set(type, value);
+        this.types = [...values.keys()];
+      },
+      getData(type: string) {
+        return values.get(type) || "";
+      },
+    };
+  };
+  const drag = (
+    element: Element,
+    type: string,
+    data: ReturnType<typeof payload>,
+  ) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { value: data });
+    element.dispatchEvent(event);
+  };
+  const drop = async (element: Element) => {
+    await act(async () => {
+      drag(element, "drop", data);
+      await vi.mocked(api.changeLibraryFolder).mock.results.at(-1)?.value;
+      await vi.mocked(api.saveLibraryPreferences).mock.results.at(-1)?.value;
+    });
+  };
+  const data = payload();
+  const ml = navButton("ML");
+  const vision = navButton("Vision");
+  const nlp = navButton("NLP");
+  expect(ml.draggable).toBe(true);
+  await act(async () => {
+    drag(ml, "dragstart", data);
+    drag(vision, "dragover", data);
+    drag(vision, "drop", data);
+  });
+  expect(api.changeLibraryFolder).not.toHaveBeenCalled();
+  await act(async () => {
+    drag(vision, "dragstart", data);
+    drag(ml, "dragover", data);
+    drag(ml, "drop", data);
+  });
+  expect(api.changeLibraryFolder).not.toHaveBeenCalled();
+  await act(async () => {
+    drag(ml, "dragstart", data);
+    drag(nlp, "dragover", data);
+  });
+  expect(nlp.dataset.dropOver).toBe("true");
+  await drop(nlp);
+  expect(api.changeLibraryFolder).toHaveBeenCalledExactlyOnceWith(
+    "papers",
+    "ML",
+    "NLP/ML",
+  );
+  vi.mocked(api.changeLibraryFolder).mockClear();
+  await act(async () =>
+    useReaderStore.setState({
+      documents: nested,
+      libraryPreferences: {
+        mode: "papers",
+        papers: { categories: ["ML", "ML/Vision", "NLP"] },
+      },
+    }),
+  );
+  await act(async () => root.render(<Harness />));
+  const heading = [...host.querySelectorAll("h3")].find((item) =>
+    item.textContent?.includes("分类"),
+  )!;
+  const child = navButton("Vision");
+  await act(async () => {
+    drag(child, "dragstart", data);
+    drag(heading, "dragover", data);
+  });
+  expect(heading.dataset.dropOver).toBe("true");
+  await drop(heading);
+  expect(api.changeLibraryFolder).toHaveBeenCalledExactlyOnceWith(
+    "papers",
+    "ML/Vision",
+    "Vision",
+  );
+});
+
 it("removes live drag styles on unmount without saving", async () => {
   await act(async () =>
     useReaderStore.setState({

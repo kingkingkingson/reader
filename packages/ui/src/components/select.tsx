@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
+import { useOverlayPortal } from "@reader/ui/lib/overlay-container";
 import { cn } from "@reader/ui/lib/utils";
 
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
@@ -70,8 +71,9 @@ function SelectContent({
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
   >) {
+  const portal = useOverlayPortal();
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal {...portal}>
       <SelectPrimitive.Positioner
         side={side}
         sideOffset={sideOffset}

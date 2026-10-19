@@ -491,6 +491,19 @@ export const validCategory = (name: string) =>
   // eslint-disable-next-line no-control-regex
   !/[\u0000-\u001f\u007f]/.test(name);
 
+/**
+ * Path after dropping category `from` onto `onto`.
+ * An empty `onto` lifts it to the top level. Returns "" when the drop would
+ * not change the parent, or would place a category inside itself.
+ */
+export function categoryDropPath(from: string, onto: string) {
+  const leaf = categoryLeaf(from);
+  const next = cleanCategory(onto ? `${onto}/${leaf}` : leaf);
+  if (!leaf || next.toLowerCase() === from.toLowerCase()) return "";
+  if (onto && withinCategory(onto, from)) return "";
+  return validCategory(next) ? next : "";
+}
+
 export const categoryColors = [
   { value: "#e5534b", label: "红色" },
   { value: "#e8883a", label: "橙色" },
