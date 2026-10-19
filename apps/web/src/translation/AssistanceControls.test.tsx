@@ -119,12 +119,14 @@ it("keeps completion visible and requires confirmation before retranslation", as
   await render(1, ready);
   expect(host.textContent).toContain("翻译完成");
   const restart = () =>
-    host.querySelector<HTMLButtonElement>('[aria-label="重新翻译"]')!;
+    [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "重新翻译全文",
+    )!;
   await act(async () => restart().click());
   expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
     "重新翻译全文？",
   );
-  expect(api.setAssistance).not.toHaveBeenCalled();
+  expect(api.translate).not.toHaveBeenCalled();
   const dialogButton = (text: string) =>
     [
       ...document.querySelectorAll<HTMLButtonElement>(
@@ -132,26 +134,27 @@ it("keeps completion visible and requires confirmation before retranslation", as
       ),
     ].find((b) => b.textContent === text)!;
   await act(async () => dialogButton("取消").click());
-  expect(api.setAssistance).not.toHaveBeenCalled();
+  expect(api.translate).not.toHaveBeenCalled();
   await act(async () => {
     await vi.runAllTimersAsync();
   });
   await act(async () => restart().click());
-  vi.mocked(api.setAssistance).mockRejectedValueOnce(new Error("暂时无法开始"));
-  await act(async () => dialogButton("开始重新翻译").click());
+  vi.mocked(api.translate).mockRejectedValueOnce(new Error("暂时无法开始"));
+  await act(async () => dialogButton("重新翻译").click());
   expect(host.textContent).toContain("翻译完成");
   expect(toast.error).toHaveBeenCalledWith("暂时无法开始");
   expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
-  vi.mocked(api.setAssistance).mockResolvedValueOnce({
+  vi.mocked(api.translate).mockResolvedValueOnce({ queued: true });
+  vi.mocked(api.assistance).mockResolvedValueOnce({
     ...ready,
     retranslating: true,
     status: "queued",
     updatedAt: "2026-10-17T00:00:00Z",
   });
-  await act(async () => dialogButton("开始重新翻译").click());
-  expect(api.setAssistance).toHaveBeenLastCalledWith("book", "retranslate");
+  await act(async () => dialogButton("重新翻译").click());
+  expect(api.translate).toHaveBeenLastCalledWith("book", "", true);
   expect(host.textContent).toContain("暂停重译");
-  expect(host.querySelector('[aria-label="重新翻译"]')).toBeNull();
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
 });
 
 it("offers continuation when an interrupted retranslation still has readable old text", async () => {

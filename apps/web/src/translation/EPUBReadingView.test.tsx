@@ -238,7 +238,7 @@ it("restores an original interaction after following the translated pane", async
   ).toBe(false);
   expect(
     host.querySelector('[data-sentence="1"]')?.hasAttribute("data-linked"),
-  ).toBe(false);
+  ).toBe(true);
 });
 it("keeps the translation subscription alive across modes and aborts on close", async () => {
   await click("原文译文");
@@ -353,7 +353,7 @@ it("uses independent translation typography even when old preferences request pa
   expect(pane.style.fontWeight).toBe("600");
   expect(host.querySelector(".pdf-page-navigation")).toBeNull();
 });
-it("keeps selection navigation without highlighting the source counterpart", async () => {
+it("focuses the matching block slice when a translated sentence is selected", async () => {
   await click("原文译文");
   await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
   const sentence = host.querySelector('[data-sentence="1"]')!;
@@ -366,7 +366,7 @@ it("keeps selection navigation without highlighting the source counterpart", asy
   await act(async () =>
     sentence.dispatchEvent(new MouseEvent("pointerup", { bubbles: true })),
   );
-  expect(adapter.focusEPUBLocations).not.toHaveBeenCalledWith([
+  expect(adapter.focusEPUBLocations).toHaveBeenLastCalledWith([
     expect.objectContaining({ blockId: "p1-b1", start: 16, end: 32 }),
   ]);
   expect(adapter.goTo).toHaveBeenLastCalledWith(
