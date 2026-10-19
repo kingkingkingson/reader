@@ -11,7 +11,7 @@ import { guideLaunch, type ReleaseItem } from "./releases";
 import { guideTopics, type GuideAction } from "./topics";
 
 /**
- * Shows the onboarding on first launch, release notes after an important
+ * Shows the onboarding on first launch, release notes after each
  * update, and the guide whenever it is opened.
  */
 export function GuideHost({

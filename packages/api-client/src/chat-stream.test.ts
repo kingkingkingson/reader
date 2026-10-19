@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { consumeChatStream, type ChatStreamEvent } from "./chat-stream";
+import fixtures from "../../../docs/fixtures/agent-streaming-v1.json";
 const encode = (text: string) => new TextEncoder().encode(text);
 function stream(chunks: Uint8Array[]) {
   return new ReadableStream<Uint8Array>({
@@ -12,6 +13,31 @@ function stream(chunks: Uint8Array[]) {
 const fixture =
   ': comment\r\nevent:status\r\ndata: {"status":"reading"}\r\n\r\nevent: delta\r\ndata: {"text":\r\ndata: "中文 👩🏽‍💻 é\\n"}\r\n\r\nevent:done\r\ndata:{"ok":true}\r\n\r\n';
 describe("frozen SSE consumption", () => {
+  it("keeps document tool activity separate from final text", async () => {
+    const fixture = fixtures.find(
+      (value) => value.name === "document-activity",
+    )!;
+    const events: ChatStreamEvent[] = [];
+    await consumeChatStream(
+      stream([encode(fixture.wire)]),
+      new AbortController().signal,
+      (event) => events.push(event),
+    );
+    expect(events.map((event) => event.event)).toEqual([
+      "status",
+      "activity",
+      "activity",
+      "activity",
+      "delta",
+      "done",
+    ]);
+    expect(
+      events
+        .filter((event) => event.event === "delta")
+        .map((event) => event.data.text)
+        .join(""),
+    ).toBe(fixture.text);
+  });
   it("preserves UTF8 across every byte boundary, CRLF and multiline data", async () => {
     const bytes = encode(fixture);
     const seen: ChatStreamEvent[] = [];

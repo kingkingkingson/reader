@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignText, decodeRegions } from "./layout";
+import { assignText, decodeRegions, isAsset } from "./layout";
 describe("layout boundary", () => {
   it("rejects invalid boxes, clips coordinates and retains logical reading order", () => {
     const regions = decodeRegions(
@@ -183,4 +183,22 @@ it("keeps the lines and indentation of algorithm blocks", () => {
     "Algorithm 1: Read phase\n1     Function read(txn, record)\n2         latch(record)",
   );
   expect(texts[1]).toBe("Prose wraps onto one line.");
+});
+
+it("keeps algorithm regions as standalone image assets with searchable text", () => {
+  const regions = decodeRegions([1, 0.886, 10, 10, 90, 70, 0], 100, 100);
+  const blocks = readingRegions(regions, [
+    {
+      text: "Algorithm 1: Read phase",
+      bounds: { x: 0.12, y: 0.12, width: 0.5, height: 0.03 },
+    },
+    {
+      text: "latch(record)",
+      bounds: { x: 0.15, y: 0.2, width: 0.3, height: 0.03 },
+    },
+  ]);
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0].label).toBe("algorithm");
+  expect(blocks[0].text).toContain("latch(record)");
+  expect(isAsset(blocks[0].label)).toBe(true);
 });

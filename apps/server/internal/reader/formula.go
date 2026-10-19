@@ -13,7 +13,7 @@ import (
 func isFormula(b PDFBlock) bool { return b.Label == "display_formula" || b.Label == "inline_formula" }
 func isImageAsset(b PDFBlock) bool {
 	switch b.Label {
-	case "table", "chart", "image", "display_formula", "inline_formula":
+	case "algorithm", "table", "chart", "image", "display_formula", "inline_formula":
 		return true
 	}
 	return b.Image != ""

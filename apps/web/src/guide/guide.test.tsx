@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@reader/api";
+import { toast } from "sonner";
 import {
   cursorAt,
   paint,
@@ -60,12 +61,12 @@ describe("guide launch", () => {
       guideLaunch({ onboarded: true, seenVersion: "0.0.1" }, version, true),
     ).toMatchObject({ kind: "release" });
   });
-  it("records versions without notes silently", () => {
+  it("shows update feedback even for versions without notes", () => {
     expect(
       guideLaunch({ onboarded: true, seenVersion: "0.0.1" }, "0.0.2", true),
     ).toEqual({
-      kind: "none",
-      save: { onboarded: true, seenVersion: "0.0.2" },
+      kind: "release",
+      items: [],
     });
   });
   it("does not repeat the onboarding after the library is emptied", () => {
@@ -188,10 +189,29 @@ describe("guide host", () => {
     vi.mocked(api.guidePreferences).mockResolvedValue({});
     await render(false);
     expect(document.querySelector('[data-slot="dialog-close"]')).toBeNull();
+    expect(button("跳过")).toBeUndefined();
+    await act(async () => {
+      button("下一步").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      const backdrop = document.querySelector('[data-slot="dialog-overlay"]')!;
+      backdrop.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true, button: 0 }),
+      );
+      backdrop.dispatchEvent(
+        new MouseEvent("pointerup", { bubbles: true, button: 0 }),
+      );
+      backdrop.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, button: 0 }),
+      );
+    });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(api.saveGuidePreferences).not.toHaveBeenCalled();
     const pages = onboardingPages();
     for (const page of pages.slice(0, -1)) {
       expect(document.body.textContent).toContain(page.step.title);
       await act(async () => button("下一步").click());
+      expect(api.saveGuidePreferences).not.toHaveBeenCalled();
     }
     expect(document.body.textContent).toContain(pages.at(-1)!.step.title);
     await act(async () => button("开始使用").click());
@@ -207,10 +227,77 @@ describe("guide host", () => {
     await render(true, version);
     expect(document.body.textContent).toContain(`Reader ${version} 更新内容`);
     expect(document.body.textContent).toContain(items[0].title);
-    await act(async () => button("知道了").click());
+    const open = vi
+      .spyOn(window, "open")
+      .mockReturnValue({ opener: null } as Window);
+    await act(async () => button("去 GitHub 点 Star").click());
+    expect(open).toHaveBeenCalledWith(
+      "https://github.com/cynicalight/reader",
+      "_blank",
+    );
     expect(api.saveGuidePreferences).toHaveBeenCalledWith({
       onboarded: true,
       seenVersion: version,
+    });
+  });
+
+  it("opens issues from an update without notes and remembers the version", async () => {
+    vi.mocked(api.guidePreferences).mockResolvedValue({
+      onboarded: true,
+      seenVersion: "0.0.1",
+    });
+    const openExternal = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, "readerDesktop", {
+      configurable: true,
+      value: { openExternal },
+    });
+    try {
+      await render(true);
+      expect(document.querySelector('[data-slot="dialog-close"]')).toBeNull();
+      await act(async () => button("已点 Star，去提 Issue").click());
+      expect(openExternal).toHaveBeenCalledWith(
+        "https://github.com/cynicalight/reader/issues/new/choose",
+      );
+      expect(api.saveGuidePreferences).toHaveBeenCalledWith({
+        onboarded: true,
+        seenVersion: "9.9.9",
+      });
+    } finally {
+      Object.defineProperty(window, "readerDesktop", {
+        configurable: true,
+        value: undefined,
+      });
+    }
+  });
+
+  it("keeps the update available when opening the browser fails", async () => {
+    vi.mocked(api.guidePreferences).mockResolvedValue({
+      onboarded: true,
+      seenVersion: "0.0.1",
+    });
+    vi.spyOn(window, "open").mockReturnValue(null);
+    await render(true);
+    await act(async () => button("去 GitHub 点 Star").click());
+    expect(toast.error).toHaveBeenCalled();
+    expect(api.saveGuidePreferences).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(button("去 GitHub 点 Star").disabled).toBe(false);
+  });
+
+  it("remembers an update dismissed with Escape", async () => {
+    vi.mocked(api.guidePreferences).mockResolvedValue({
+      onboarded: true,
+      seenVersion: "0.0.1",
+    });
+    await render(true);
+    await act(async () =>
+      button("去 GitHub 点 Star").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+    expect(api.saveGuidePreferences).toHaveBeenCalledWith({
+      onboarded: true,
+      seenVersion: "9.9.9",
     });
   });
 

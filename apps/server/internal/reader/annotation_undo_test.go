@@ -112,12 +112,35 @@ func TestAnnotationUndoRestoresAllMergedUnderlines(t *testing.T) {
 		})
 	}
 }
+func TestAnnotationUndoRestoresMergedHighlights(t *testing.T) {
+	s, _ := processingFixture(t)
+	a := pdfUnderline("first", []annotationRect{{.1, .2, .3, .02}}, "one two")
+	a.Kind = "highlight"
+	if _, err := s.Store.saveAnnotation(a); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := annotationSnapshot(s.Store.DB, "doc")
+	b := pdfUnderline("", []annotationRect{{.3, .2, .3, .02}}, "two three")
+	b.Kind = "highlight"
+	undoMark(t, s, "client", b)
+	after, _ := annotationSnapshot(s.Store.DB, "doc")
+	if len(after) != 1 || reflect.DeepEqual(before, after) {
+		t.Fatalf("highlight was not merged: %v", after)
+	}
+	undoLast(t, s, "client")
+	restored, _ := annotationSnapshot(s.Store.DB, "doc")
+	if !reflect.DeepEqual(before, restored) {
+		t.Fatal("undo lost the original highlight")
+	}
+}
 func TestAnnotationUndoPreservesOtherSessionsAndRejectsStaleChanges(t *testing.T) {
 	s, _ := processingFixture(t)
 	a := pdfUnderline("", []annotationRect{{.1, .2, .2, .02}}, "one")
 	a.Kind = "highlight"
 	first := undoMark(t, s, "one", a)
-	second := undoMark(t, s, "two", a)
+	b := pdfUnderline("", []annotationRect{{.5, .2, .2, .02}}, "two")
+	b.Kind = "highlight"
+	second := undoMark(t, s, "two", b)
 	undoLast(t, s, "one")
 	items, _ := annotationSnapshot(s.Store.DB, "doc")
 	if len(items) != 1 || items[second.ID] == "" || items[first.ID] != "" {

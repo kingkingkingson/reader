@@ -29,6 +29,7 @@
     "openapi-typescript": "^7.10.1",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "@types/yazl": "3.3.1"
   }
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutGrid, List, Plus, X } from "lucide-react";
+import { LayoutGrid, List, Plus, Trash2, X } from "lucide-react";
 import type { Document, DocumentCategory } from "@reader/core";
 import { api } from "@reader/api";
 import { Button } from "@reader/ui/components/button";
@@ -135,11 +135,13 @@ export function LibraryFilterBar({
       />
       {changed && (
         <Button
-          size="sm"
+          size="icon-sm"
           variant="ghost"
+          aria-label="清除筛选"
+          title="清除筛选"
           onClick={() => onChange({ ...initialFilters, sort: filters.sort })}
         >
-          清除筛选
+          <Trash2 />
         </Button>
       )}
       <span className="text-xs text-muted-foreground" role="status">

@@ -52,9 +52,10 @@ export function notesMarkdown(
   data: { annotations: Annotation[]; messages: Message[]; paperNote: string },
   chosen: ExportPart[],
   link?: (annotation: Annotation) => string,
+  options: { includeTitle?: boolean } = {},
 ) {
   const parts = new Set(chosen);
-  const out = [`# ${doc.title}`];
+  const out = options.includeTitle === false ? [] : [`# ${doc.title}`];
   if (parts.has("info")) {
     const info = [
       doc.metadata.translatedTitle,

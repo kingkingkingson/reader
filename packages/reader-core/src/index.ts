@@ -23,6 +23,8 @@ export type PDFLocation = {
   x?: number;
   y?: number;
   quote?: string;
+  /** Search-only paragraph context and UTF-16 offset of the selected match. */
+  quoteContext?: { text: string; start: number };
   sentenceLink?: SentenceLink;
   translation?: TranslationLocation;
   rects?: { x: number; y: number; width: number; height: number }[];
@@ -59,7 +61,7 @@ export type EPUBLocation = {
 };
 export type DocumentLocation = PDFLocation | EPUBLocation;
 export type DocumentCategory = "book" | "article" | "paper";
-/** Books and papers are separate libraries; papers are PDFs up to 150 pages and 50 MB. */
+/** Books and papers are separate libraries; large PDFs require confirmation. */
 export type LibraryMode = "books" | "papers";
 export type PaperItemType =
   | "journal"
@@ -113,6 +115,9 @@ export type PaperSort =
   | "opened"
   | "added"
   | "year"
+  | "published"
+  | "progress"
+  | "size"
   | "title"
   | "author"
   | "venue"
@@ -120,7 +125,38 @@ export type PaperSort =
   | "notes";
 /** Optional columns of the paper table; the title is always shown. */
 export type PaperColumn =
-  "authors" | "year" | "venue" | "added" | "opened" | "notes" | "status";
+  | "authors"
+  | "year"
+  | "published"
+  | "tags"
+  | "progress"
+  | "doi"
+  | "arxiv"
+  | "size"
+  | "venue"
+  | "added"
+  | "opened"
+  | "notes"
+  | "status";
+export interface JournalRankBadge {
+  key: string;
+  name: string;
+  value: string;
+  subject?: string;
+  year?: string;
+}
+export interface JournalRankResult {
+  status: "found" | "notFound" | "notApplicable" | "noVenue" | "disabled";
+  badges: JournalRankBadge[];
+  checkedAt?: string;
+}
+export interface JournalRankConfig {
+  enabled: boolean;
+  hasKey: boolean;
+  filterMode: "include" | "exclude";
+  selected: string[];
+  available: { key: string; name: string }[];
+}
 export interface PaperLibraryPreferences {
   /** Category (folder) order, including categories without papers. */
   categories?: string[];
@@ -144,6 +180,8 @@ export interface PaperLibraryPreferences {
   layout?: "list" | "table";
   /** Visible table columns in order. */
   columns?: PaperColumn[];
+  /** Order of all table columns, including hidden ones; the title remains visible. */
+  columnOrder?: ("title" | PaperColumn)[];
   /** Widths of resized table columns in CSS pixels; the title fills the rest. */
   columnWidths?: Partial<Record<PaperColumn, number>>;
   /** Width of the paper detail panel in CSS pixels. */
@@ -245,6 +283,8 @@ export interface SelectionAnchor {
   bottom: number;
 }
 export interface ReaderSelection {
+  /** Nearby source text, captured before the DOM selection is cleared. */
+  context?: { before: string; after: string };
   /** Transient renderer viewport position; never persist as a document anchor. */
   anchor?: SelectionAnchor;
   text: string;
@@ -258,7 +298,18 @@ export type Appearance = "light" | "sepia" | "cream" | "dark" | "system";
 /** Library chrome. Unset uses the colored zotero style. */
 export type LibraryChrome = "plain" | "zotero";
 export interface ReaderTheme {
+  /** Opt in to copying text selections and selected annotations. */
+  autoCopySelection?: boolean;
   autoTranslatePDF?: boolean;
+  /** 0 means manual only; otherwise auto translate papers up to this many pages. */
+  autoTranslateMaxPages?: number;
+  /** How figures and embedded images are displayed when a PDF uses dark mode. */
+  pdfDarkImageMode?: "preserve" | "invert" | "adaptive";
+  /** Contrast used for PDF text and paper while the dark reading appearance is active. */
+  pdfDarkContrast?: "high" | "soft";
+  autoGenerateOverview?: boolean;
+  /** Estimated total document-agent context; output and history reserve is included. */
+  documentContextTokens?: number;
   appearance?: Appearance;
   /** "zotero" colors icons and stripes list rows; "plain" keeps the flat gray chrome. */
   chrome?: LibraryChrome;
@@ -271,6 +322,8 @@ export interface ReaderTheme {
   zoom: number | "width";
   /** Translated text size in rem; smaller than the source by default. */
   translationFontSize?: number;
+  /** AI conversation text scale; 1 keeps the existing size. */
+  assistantFontScale?: number;
   /** "sans-serif", "serif" or an installed font family name. */
   translationFontFamily?: string;
   linkTranslationAnnotations?: boolean;
@@ -288,7 +341,12 @@ export interface HighlightColor {
   label: string;
 }
 export const defaultTheme: ReaderTheme = {
+  autoCopySelection: false,
   autoTranslatePDF: true,
+  pdfDarkImageMode: "adaptive",
+  pdfDarkContrast: "soft",
+  autoGenerateOverview: false,
+  documentContextTokens: 0,
   appearance: "system",
   mode: "light",
   fontSize: 1.15,
@@ -298,12 +356,14 @@ export const defaultTheme: ReaderTheme = {
   scroll: false,
   zoom: "width",
   translationFontSize: 1,
+  assistantFontScale: 1,
   translationFontFamily: "serif",
   translationFontWeight: "bold",
   linkTranslationAnnotations: true,
   epubFlow: "scroll",
 };
-export type PDFBlockAction = "attach" | "preview" | "explain" | "translate";
+export type PDFBlockAction =
+  "attach" | "preview" | "copy" | "explain" | "translate";
 export interface PDFReadingAnchor {
   blockId: string;
   fraction: number;
@@ -326,6 +386,10 @@ export interface LinkPreview {
   image: string;
   /** Image width divided by height. */
   ratio: number;
+  /** Exact target for the preview's explicit navigation control. */
+  location?: PDFLocation;
+  /** Re-render the crop from the PDF at the requested physical pixel width. */
+  renderImage?: (width: number, signal: AbortSignal) => Promise<string>;
 }
 export interface ReaderEvents {
   /** Show (or hide with null) a preview of an internal link's target. */
@@ -336,6 +400,8 @@ export interface ReaderEvents {
   epubReadingAnchor?: (blockId: string) => void;
   blockHover?: (block: PDFBlock | null) => void;
   annotation?: (target: ReaderAnnotationTarget | null) => void;
+  /** Hover preview only; never select or copy annotation text. */
+  annotationHover?: (target: ReaderAnnotationTarget | null) => void;
   zoom?: (zoom: ReaderTheme["zoom"]) => void;
   readingAnchor?: (anchor: PDFReadingAnchor) => void;
   blockFocus?: (block: PDFBlock) => void;
@@ -419,6 +485,21 @@ export interface Provider {
   status: string;
 }
 export interface SourceReference {
+  /** Rendered page evidence, separate from extracted text. */
+  pageImage?: {
+    page: number;
+    width: number;
+    height: number;
+    bytes: number;
+    sourceId: string;
+    corpusRevision: string;
+    contentHash: string;
+  };
+  /** Server-issued evidence from a completed document reading attempt. */
+  sourceId?: string;
+  corpusRevision?: string;
+  contentHash?: string;
+  precision?: "page" | "block" | "paragraph";
   text: string;
   location: DocumentLocation;
   kind?: "selection" | "section";
@@ -430,6 +511,10 @@ export interface ImageAttachment {
   caption?: string;
 }
 export interface Message {
+  /** Provider-returned thinking, displayed separately and never added to answer context. */
+  reasoning?: string;
+  /** Navigation snapshot at send time; not an original-text citation. */
+  readingLocation?: DocumentLocation;
   attachments?: ImageAttachment[];
   context?: string;
   references?: SourceReference[];
@@ -446,6 +531,10 @@ export interface ProcessingStage {
   warning?: string;
 }
 export interface Processing {
+  retranslating?: boolean;
+  layoutRevision?: string;
+  autoTranslateMaxPages?: number;
+  manualTranslation?: boolean;
   enabled?: boolean;
   translating?: ProcessingStage;
   usageTracked?: boolean;
@@ -500,6 +589,12 @@ export interface TranslationBlock {
   error?: string;
 }
 export interface AICapability {
+  /** Observed time to first reasoning or text output, excluding catalog lookup. */
+  textFirstOutputMs?: number;
+  visionFirstOutputMs?: number;
+  tools?: "passed" | "unsupported" | "failed";
+  toolSchemaVersion?: string;
+  toolError?: string;
   pendingVision?: boolean;
   text: boolean;
   vision: boolean;
@@ -507,6 +602,8 @@ export interface AICapability {
   error?: string;
 }
 export interface APIConnection {
+  /** Auto detects official endpoints; other addresses use OpenAI Chat Completions. */
+  protocol?: "auto" | "openai" | "anthropic";
   url: string;
   model: string;
   key?: string;
@@ -520,6 +617,8 @@ export interface AIConfig {
   efforts?: Record<string, Record<string, ReasoningEffort>>;
   translationModels?: Record<string, string>;
   translationEfforts?: Record<string, Record<string, ReasoningEffort>>;
+  /** Translation style and terminology preferences. Empty uses the default. */
+  translationPrompt?: string;
   /** Image-input model of the "api" agent; other agents use their chat model. */
   visionModels?: Record<string, string>;
   visionEfforts?: Record<string, Record<string, ReasoningEffort>>;
@@ -532,6 +631,13 @@ export interface AIConfig {
   capabilities: Record<string, AICapability>;
 }
 export interface AgentModel {
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  effortInfo?: {
+    mode: "levels" | "budget" | "fixed" | "unknown";
+    note: string;
+    mappings?: Partial<Record<ReasoningEffort, string>>;
+  };
   id: string;
   name: string;
   description: string;
@@ -608,3 +714,59 @@ export interface EPUBChapters {
   chapters: EPUBChapter[];
   toc: EPUBChapterLink[] | null;
 }
+
+export interface OverviewContent {
+  summary: string;
+  findings: { text: string; blockIds: string[] }[];
+  limitations: { text: string; blockIds: string[] }[];
+  terms: string[];
+}
+export interface OverviewSection {
+  key: string;
+  title: string;
+  firstBlockId: string;
+  lastBlockId: string;
+  location: DocumentLocation;
+  passageCount: number;
+  content: OverviewContent;
+}
+export type OverviewStatus =
+  | "missing"
+  | "queued"
+  | "running"
+  | "waiting"
+  | "complete"
+  | "partial"
+  | "failed"
+  | "canceled"
+  | "stale";
+export interface OverviewJob {
+  documentId: string;
+  status: OverviewStatus;
+  error?: string;
+  compiledPassages: number;
+  totalPassages: number;
+}
+export interface DocumentOverview extends OverviewJob {
+  stale: boolean;
+  sources?: { blockId: string; label: string; location: DocumentLocation }[];
+  corpusRevision: string;
+  compilerVersion: string;
+  content?: OverviewContent;
+  sections: OverviewSection[];
+  coverage: {
+    status: string;
+    totalUnits: number;
+    searchableUnits: number;
+    missingRanges: string[];
+    warnings: string[];
+  };
+  updatedAt: string;
+}
+export type {
+  ProxySettings,
+  ProxySettingsState,
+  ProxyCheckResult,
+} from "./proxy-settings";
+export type { UpdateProgress } from "./update-progress";
+export type { CommandLineStatus } from "./command-line";

@@ -4,6 +4,447 @@
  */
 
 export interface paths {
+    "/api/translate-selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Translate selected text using at most 30 nearby words on each side */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        text: string;
+                        before?: string;
+                        after?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Completed translation; not persisted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            text: string;
+                        };
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/overviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job states */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OverviewJob"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Persisted source-versioned overview */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        regenerate: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Existing overview or job */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Overview queued */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentOverview"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/overview/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Overview job canceled; translation unaffected */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/diagnostics/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        level: "info" | "warn" | "error";
+                        event: string;
+                        detail?: string;
+                        stack?: string;
+                        requestId?: string;
+                        route?: string;
+                        method?: string;
+                        status?: number;
+                        durationMs?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Local diagnostic event recorded */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/diagnostics/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description ZIP containing all retained local logs with redaction and a manifest */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/zip": string;
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/journal-ranks/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read local easyScholar settings without the SecretKey */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Settings and known datasets */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankConfig"];
+                    };
+                };
+            };
+        };
+        /** Save easyScholar settings; omitted key preserves the saved key */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        enabled: boolean;
+                        /** @enum {string} */
+                        filterMode?: "include" | "exclude";
+                        selected: string[];
+                        key?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankConfig"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/journal-rank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query or read cached journal indicators for one paper */
+        get: {
+            parameters: {
+                query?: {
+                    refresh?: "1";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Journal indicator result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["JournalRankResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/connector/status": {
         parameters: {
             query?: never;
@@ -120,6 +561,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/import/endnote/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Read a saved, closed EndNote SQLite library. Accepts an enl file, enlp package or directory. PDF annotations are counted and converted at import time. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        directory: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description EndNote PDF preview */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ZoteroScan"];
+                    };
+                };
+                /** @description Invalid, locked or unsupported library */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/import/endnote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Copy one previewed PDF, convert supported embedded marks into Reader annotations and remove only those marks from the copy. Source files are unchanged. */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        scanId: string;
+                        entryId: string;
+                        /** @enum {string} */
+                        library?: "papers" | "books";
+                        allowLarge?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Import result */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ZoteroImportResult"];
+                    };
+                };
+                /** @description Import failed or large-paper confirmation required */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/import/zotero": {
         parameters: {
             query?: never;
@@ -171,6 +718,13 @@ export interface paths {
                     "application/json": {
                         scanId: string;
                         entryId: string;
+                        /**
+                         * @default papers
+                         * @enum {string}
+                         */
+                        library?: "papers" | "books";
+                        /** @default false */
+                        allowLarge?: boolean;
                     };
                 };
             };
@@ -315,12 +869,12 @@ export interface paths {
                         /** Format: binary */
                         file: string;
                         /**
-                         * @description Target library. Papers accept PDFs up to 50 MB and 150 pages. Defaults to books.
+                         * @description Target library. Papers accept PDFs; over 100 MB or 100 pages requires confirmation. Defaults to books.
                          * @enum {unknown}
                          */
                         library?: "books" | "papers";
                         /**
-                         * @description Confirms a paper over 50 pages. Without it such a paper fails with 409, code large-paper and its page count.
+                         * @description Confirms a paper over 100 pages or 100 MB. Without it such a paper fails with 409, code large-paper and its page count.
                          * @enum {unknown}
                          */
                         allowLarge?: "1";
@@ -823,6 +1377,107 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Readable text in reading order for the command line. PDFs have text only after layout parsing; units are pages for a PDF and reading-order chapters for an EPUB. */
+        get: {
+            parameters: {
+                query?: {
+                    from?: number;
+                    to?: number;
+                    side?: "source" | "translation" | "both";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentText"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Search the source and translated text of every document. A block matches when it contains all whitespace-separated terms, ignoring case. */
+        get: {
+            parameters: {
+                query: {
+                    q: string;
+                    library?: "books" | "papers";
+                    document?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LibrarySearchHit"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/documents/{id}/messages": {
         parameters: {
             query?: never;
@@ -893,13 +1548,23 @@ export interface paths {
                         /** @enum {unknown} */
                         provider: "codex" | "claude" | "kimi" | "api";
                         attachments?: string[];
+                        /** @description Stable client-generated user message ID. Reuse only for explicit regeneration of the same unanswered last question, with unchanged prompt, context, references, attachments and reading location. The server uses current model settings, does not insert a duplicate question, and returns 409 if the turn has an answer or later messages. Omit for legacy clients. */
+                        userMessageId?: string;
                         prompt: string;
                         context: string;
+                        /** @description Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence. */
+                        readingLocation?: components["schemas"]["DocumentLocation"];
                         references?: {
                             text: string;
                             /** @enum {unknown} */
                             kind?: "selection" | "section";
                             location: components["schemas"]["DocumentLocation"];
+                            sourceId?: string;
+                            pageImage?: components["schemas"]["PageImageEvidence"];
+                            corpusRevision?: string;
+                            contentHash?: string;
+                            /** @enum {string} */
+                            precision?: "page" | "block" | "paragraph";
                         }[];
                     };
                 };
@@ -1149,8 +1814,11 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** @enum {string} */
-                        action: "start" | "pause" | "resume";
+                        /**
+                         * @description retranslate restarts completed paper text with saved current translation choices, retaining previous translations until replacement succeeds. Books keep chapter translation controls.
+                         * @enum {string}
+                         */
+                        action: "start" | "pause" | "resume" | "retranslate";
                     };
                 };
             };
@@ -1557,9 +2225,11 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration. */
-                    capability?: "text" | "vision";
+                    capability?: "text" | "vision" | "tools";
                     /** @description Required for the api provider, which is checked one model at a time; the result is stored under capabilities["api:<model>"]. */
                     model?: string;
+                    /** @description Per-stage wait limit for API model text/vision probes only. Omit or use 0 for defaults (text 45 seconds, vision 90 seconds). Does not change generation timeouts or saved connection settings. */
+                    timeoutSeconds?: number;
                 };
                 header?: never;
                 path: {
@@ -1576,6 +2246,113 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["AICapability"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/translations/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export saved PDF or EPUB translations as Markdown or a ZIP with local images
+         * @description Uses completed visible translations, including previous results during retranslation. Marks untranslated or unparsed content. Does not start translation.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    format?: "markdown" | "zip";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Download; Markdown excludes images, ZIP includes translation.md and assets/ */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/markdown": string;
+                        "application/zip": string;
+                    };
+                };
+                /** @description No completed translation or source not ready */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Export translations together with selected notes and annotations
+         * @description Appends client-rendered Markdown for the selected notes, annotations, bookmarks or chat to the same document. This is a download only; it does not save the supplied content.
+         */
+        post: {
+            parameters: {
+                query?: {
+                    format?: "markdown" | "zip";
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description JSON body limited to 16 MiB */
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Selected content without a document title; appended after the translation */
+                        notesMarkdown?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Markdown or ZIP containing the combined Markdown and local images */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/markdown": string;
+                        "application/zip": string;
                     };
                 };
                 /** @description Error */
@@ -2173,7 +2950,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    key: "library" | "guide";
+                    key: "library" | "guide" | "shortcuts";
                 };
                 cookie?: never;
             };
@@ -2206,7 +2983,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    key: "library" | "guide";
+                    key: "library" | "guide" | "shortcuts";
                 };
                 cookie?: never;
             };
@@ -2692,6 +3469,13 @@ export interface paths {
                 content: {
                     "application/json": {
                         ref: string;
+                        /**
+                         * @default papers
+                         * @enum {string}
+                         */
+                        library?: "papers" | "books";
+                        /** @default false */
+                        allowLarge?: boolean;
                     };
                 };
             };
@@ -2901,10 +3685,148 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/messages/{message}/sources/{source}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Validate a persisted original-text citation before navigation */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    message: string;
+                    source: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Original source is still current */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            valid: boolean;
+                        };
+                    };
+                };
+                /** @description Document, message or source is unavailable */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Original text or citation version has changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        OverviewContent: {
+            summary: string;
+            findings: {
+                text: string;
+                blockIds: string[];
+            }[];
+            limitations: {
+                text: string;
+                blockIds: string[];
+            }[];
+            terms: string[];
+        };
+        OverviewSection: {
+            key: string;
+            title: string;
+            firstBlockId: string;
+            lastBlockId: string;
+            location: {
+                [key: string]: unknown;
+            };
+            passageCount: number;
+            content: components["schemas"]["OverviewContent"];
+        };
+        DocumentOverview: {
+            stale?: boolean;
+            sources?: {
+                blockId: string;
+                label: string;
+                location: {
+                    [key: string]: unknown;
+                };
+            }[];
+            documentId: string;
+            corpusRevision: string;
+            compilerVersion: string;
+            /** @enum {string} */
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            content?: components["schemas"]["OverviewContent"];
+            sections: components["schemas"]["OverviewSection"][];
+            coverage: {
+                status: string;
+                totalUnits: number;
+                searchableUnits: number;
+                missingRanges: string[];
+                warnings: string[];
+            };
+            compiledPassages: number;
+            totalPassages: number;
+            updatedAt: string;
+            error?: string;
+        };
+        OverviewJob: {
+            documentId: string;
+            /** @enum {string} */
+            status: "missing" | "queued" | "running" | "waiting" | "complete" | "partial" | "failed" | "canceled" | "stale";
+            error: string;
+            compiledPassages: number;
+            totalPassages: number;
+        };
+        JournalRankConfig: {
+            enabled: boolean;
+            hasKey: boolean;
+            /** @enum {string} */
+            filterMode: "include" | "exclude";
+            selected: string[];
+            available: {
+                key: string;
+                name: string;
+            }[];
+        };
+        JournalRankResult: {
+            /** @enum {string} */
+            status: "found" | "notFound" | "notApplicable" | "noVenue" | "disabled";
+            checkedAt?: string;
+            badges: {
+                key: string;
+                name: string;
+                value: string;
+                subject?: string;
+                year?: string;
+            }[];
+        };
         ZoteroEntry: {
             id: string;
             title: string;
@@ -2931,6 +3853,15 @@ export interface components {
             annotations: number;
             warnings: string[];
         };
+        PageImageEvidence: {
+            page: number;
+            width: number;
+            height: number;
+            bytes: number;
+            sourceId: string;
+            corpusRevision: string;
+            contentHash: string;
+        };
         DocumentLocation: {
             /** @constant */
             type: "pdf";
@@ -2938,6 +3869,11 @@ export interface components {
             x?: number;
             y?: number;
             quote?: string;
+            /** @description Search paragraph context and UTF-16 offset of the selected match. */
+            quoteContext?: {
+                text: string;
+                start: number;
+            };
             rects?: {
                 x: number;
                 y: number;
@@ -3004,6 +3940,42 @@ export interface components {
             /** @description IDs removed when overlapping underlines were merged into the returned annotation. */
             replacedIds?: string[];
         };
+        DocumentText: {
+            documentId: string;
+            /** @enum {string} */
+            type: "epub" | "pdf";
+            /** @description Page count of a PDF or chapter count of an EPUB. */
+            units: number;
+            /** @description False for a PDF without a layout index; it then has no blocks. */
+            parsed: boolean;
+            /** @description Parsed pages of a partly parsed book; absent means all. */
+            parsedPages?: number[];
+            blocks: components["schemas"]["TextBlock"][];
+        };
+        TextBlock: {
+            id: string;
+            /** @description Page or chapter, starting at 1. */
+            unit: number;
+            /** @description EPUB chapter resource. */
+            href?: string;
+            label: string;
+            /** @description Source text, or a figure caption; empty on the translation side. */
+            text: string;
+            /** @description Completed translation, when requested. */
+            translation?: string;
+        };
+        LibrarySearchHit: {
+            documentId: string;
+            title: string;
+            /** @enum {string} */
+            type: "epub" | "pdf";
+            unit: number;
+            href?: string;
+            blockId: string;
+            /** @enum {string} */
+            side: "source" | "translation";
+            excerpt: string;
+        };
         SearchResult: {
             id: string;
             excerpt: string;
@@ -3015,8 +3987,12 @@ export interface components {
             /** @enum {unknown} */
             role: "user" | "assistant";
             content: string;
+            /** @description Provider-returned thinking displayed separately from the final answer. */
+            reasoning?: string;
             createdAt: string;
             context?: string;
+            /** @description Original reading position at send time, retained independently of current navigation and source citations. */
+            readingLocation?: components["schemas"]["DocumentLocation"];
             attachments?: {
                 id: string;
                 page: number;
@@ -3028,6 +4004,12 @@ export interface components {
                 /** @enum {unknown} */
                 kind?: "selection" | "section";
                 location: components["schemas"]["DocumentLocation"];
+                sourceId?: string;
+                pageImage?: components["schemas"]["PageImageEvidence"];
+                corpusRevision?: string;
+                contentHash?: string;
+                /** @enum {string} */
+                precision?: "page" | "block" | "paragraph";
             }[];
         };
         Provider: {
@@ -3042,11 +4024,33 @@ export interface components {
         };
         /** @description Decoded SSE event union for documentation and generated types only. Wire uses event: NAME and data: JSON lines; no envelope is transmitted. Append delta text verbatim. Only done confirms successful persistence. EOF is not completion. After error/done ignore late data. No automatic POST replay. */
         ChatStreamEvent: {
+            /** @constant */
+            event: "reasoning";
+            data: {
+                text: string;
+            };
+        } | {
+            /** @constant */
+            event: "draft";
+            data: {
+                text: string;
+                reset: boolean;
+            };
+        } | {
             /** @enum {string} */
             event: "status";
             data: {
                 /** @enum {string} */
                 status: "reading" | "reading-image";
+            };
+        } | {
+            /** @enum {string} */
+            event: "activity";
+            data: {
+                /** @enum {string} */
+                phase: "indexing" | "reading" | "writing";
+                message: string;
+                tool?: string;
             };
         } | {
             /** @enum {string} */
@@ -3085,6 +4089,10 @@ export interface components {
         };
         Processing: {
             enabled?: boolean;
+            readonly manualTranslation?: boolean;
+            readonly retranslating?: boolean;
+            readonly layoutRevision?: string;
+            readonly autoTranslateMaxPages?: number;
             /** @description EPUB work uses explicit chapter requests; the legacy automatic queue has been migrated. */
             readonly epubManual?: boolean;
             translating?: components["schemas"]["ProcessingStage"];
@@ -3123,19 +4131,47 @@ export interface components {
         };
         AICapability: {
             text: boolean;
+            /** @description Last text probe's time to first nonempty reasoning or text output, excluding catalog lookup. Omitted if no output was observed. This is a single observation, not a provider benchmark. */
+            textFirstOutputMs?: number;
+            /** @description Last vision probe's time to first nonempty reasoning or text output, excluding catalog lookup. Omitted if no output was observed. */
+            visionFirstOutputMs?: number;
             /** @description Text passed; vision has not finished. Resume vision on the next check. */
             pendingVision?: boolean;
             vision: boolean;
             checkedAt: string;
             error?: string;
+            /**
+             * @description Independent structured tool-call capability; missing means not checked.
+             * @enum {string}
+             */
+            tools?: "passed" | "unsupported" | "failed";
+            toolError?: string;
+            /** @description Server-owned fingerprint of the checked tool protocol and schemas. */
+            toolSchemaVersion?: string;
         };
         APIConnection: {
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            protocol: "auto" | "openai" | "anthropic";
             url: string;
             model: string;
             key?: string;
             hasKey: boolean;
         };
         AgentModel: {
+            /** @description Provider-reported context capacity; omitted when unavailable */
+            contextWindow?: number;
+            maxOutputTokens?: number;
+            effortInfo?: {
+                /** @enum {string} */
+                mode: "levels" | "budget" | "fixed" | "unknown";
+                note: string;
+                mappings?: {
+                    [key: string]: string;
+                };
+            };
             id: string;
             name: string;
             description: string;
@@ -3165,6 +4201,8 @@ export interface components {
             translationModels?: {
                 [key: string]: string;
             };
+            /** @description Translation style and terminology preferences. Empty resets to default; omission preserves the saved value. Does not replace source-alignment or output-format rules. */
+            translationPrompt?: string;
             /** @description Translation effort by provider and model ID. Defaults to medium. */
             translationEfforts?: {
                 [key: string]: {

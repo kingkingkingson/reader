@@ -77,6 +77,7 @@ let events: {
   location: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   selection: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   annotation: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
+  annotationHover: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   epubReadingAnchor: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
   epubInteraction: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
 };
@@ -179,6 +180,7 @@ beforeEach(() => {
     location: vi.fn(),
     selection: vi.fn(),
     annotation: vi.fn(),
+    annotationHover: vi.fn(),
     epubReadingAnchor: vi.fn(),
     epubInteraction: vi.fn(),
   };
@@ -302,6 +304,49 @@ it("paints saved colors, opens annotation targets on hit, and removes highlights
   expect([...registry.values()][0].values().next().value?.toString()).toBe(
     "Same words",
   );
+});
+it("does not paint a translated annotation on its stored source range", async () => {
+  await open();
+  await reader.highlight([
+    {
+      id: "translated",
+      kind: "highlight",
+      color: "#e6b94c",
+      quote: "译文",
+      location: {
+        type: "epub",
+        href: "a.xhtml",
+        blockId: "a",
+        start: 12,
+        end: 22,
+        translation: {
+          blockId: "a",
+          sourceHash: "h",
+          sentenceIndexes: [0],
+          start: 0,
+          end: 2,
+          ranges: [
+            {
+              blockId: "a",
+              sourceHash: "h",
+              sentenceIndexes: [0],
+              start: 0,
+              end: 2,
+              quote: "译文",
+              location: {
+                type: "epub",
+                href: "a.xhtml",
+                blockId: "a",
+                start: 12,
+                end: 22,
+              },
+            },
+          ],
+        },
+      },
+    } as Annotation,
+  ]);
+  expect(registry.size).toBe(0);
 });
 it("restores a block location, reports progress, and returns the current chapter for AI", async () => {
   await open({ type: "epub", href: "b.xhtml", blockId: "c", start: 0, end: 0 });
@@ -694,4 +739,41 @@ it("keeps nested TOC anchors in their containing block", async () => {
   await open();
   await reader.goTo({ type: "epub", href: "a.xhtml#nested-anchor" });
   expect(reader.getLocation()).toMatchObject({ href: "a.xhtml", blockId: "a" });
+});
+
+it("emits note hover independently of selection/click and clears it on leaving", async () => {
+  await open();
+  const annotation = {
+    id: "note",
+    kind: "note",
+    note: "批注内容",
+    color: "#e6b94c",
+    quote: "Same words",
+    location: {
+      type: "epub",
+      href: "a.xhtml",
+      blockId: "a",
+      start: 0,
+      end: 10,
+    },
+  } as Annotation;
+  await reader.highlight([annotation]);
+  const text = host.querySelector('[data-epub-run="a"]')!;
+  const top = text.getBoundingClientRect().top;
+  events.annotation.mockClear();
+  events.selection.mockClear();
+  text.dispatchEvent(
+    new MouseEvent("pointermove", {
+      bubbles: true,
+      clientX: 40,
+      clientY: top + 10,
+    }),
+  );
+  expect(events.annotationHover).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ids: ["note"] }),
+  );
+  expect(events.annotation).not.toHaveBeenCalled();
+  expect(events.selection).not.toHaveBeenCalled();
+  host.dispatchEvent(new MouseEvent("pointerleave"));
+  expect(events.annotationHover).toHaveBeenLastCalledWith(null);
 });

@@ -196,6 +196,14 @@ func TestConnectorOriginRestriction(t *testing.T) {
 	if w.Code != 403 {
 		t.Fatalf("other extension origin: %d", w.Code)
 	}
+	for _, origin := range []string{connectorExtensionOrigin, connectorStoreExtensionOrigin} {
+		r.Header.Set("Origin", origin)
+		w = httptest.NewRecorder()
+		s.ConnectorHandler().ServeHTTP(w, r)
+		if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != origin {
+			t.Fatalf("%s: %d %q", origin, w.Code, w.Header().Get("Access-Control-Allow-Origin"))
+		}
+	}
 }
 
 func TestConnectorOriginlessBrowserRequestNeedsCredential(t *testing.T) {
@@ -221,5 +229,40 @@ func TestConnectorOriginlessBrowserRequestNeedsCredential(t *testing.T) {
 	}
 	if code := requestWithoutOrigin("/v1/session", ""); code != 403 {
 		t.Fatalf("originless session request: %d", code)
+	}
+}
+
+func TestConnectorLargePaperConfirmation(t *testing.T) {
+	for _, library := range []string{"papers", "books"} {
+		t.Run(library, func(t *testing.T) {
+			s := testServer(t)
+			secret := sessionTestConnector(t, s)
+			for _, confirmed := range []bool{false, true} {
+				var body bytes.Buffer
+				m := multipart.NewWriter(&body)
+				m.WriteField("metadata", `{"title":"Large PDF"}`)
+				m.WriteField("sourceUrl", "https://example.org/paper")
+				if confirmed {
+					m.WriteField("allowLarge", "1")
+					m.WriteField("library", library)
+				}
+				f, _ := m.CreateFormFile("pdf", "paper.pdf")
+				f.Write(testPDF(160))
+				m.Close()
+				w := bridgeRequest(s, "POST", "/v1/import", secret, &body, m.FormDataContentType())
+				if !confirmed {
+					if w.Code != 409 || !strings.Contains(w.Body.String(), "large-paper") {
+						t.Fatalf("missing confirmation: %d %s", w.Code, w.Body.String())
+					}
+				} else {
+					var result struct {
+						Document Document `json:"document"`
+					}
+					if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Document.Library != library {
+						t.Fatalf("destination: %d %s", w.Code, w.Body.String())
+					}
+				}
+			}
+		})
 	}
 }

@@ -51,7 +51,17 @@ func (c *codexChatCache) acquire(root, model string, in AIInput) (*codexSession,
 	executable, _ := exec.LookPath("codex")
 	key := executable + "\x00" + model + "\x00" + in.Effort + "\x00" + chat.Title
 	e := c.entry
-	if e != nil && (e.key != key || e.document != chat.DocumentID || e.savedID != chat.PriorID || e.pending != nil || e.turns >= 64 || e.sourceBytes >= 256000) {
+	// A reused session keeps every source it has seen, so count this turn's new
+	// sources too; a fresh session receives only the budgeted list.
+	unseen := 0
+	if e != nil {
+		for _, source := range chat.Sources {
+			if !e.seen[source.ID] {
+				unseen += len(source.Text)
+			}
+		}
+	}
+	if e != nil && (e.key != key || e.document != chat.DocumentID || e.savedID != chat.PriorID || e.pending != nil || e.turns >= 64 || e.sourceBytes+unseen > chatSourceBytes) {
 		c.discardLocked()
 		e = nil
 	}
@@ -139,6 +149,12 @@ type codexChatAdapter struct {
 }
 
 func (a codexChatAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && len(req.Input.images()) == 0 {
+		a.cache.reset()
+		return a.streamWith(ctx, req, emit, func(cli cliAdapter, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
+			return streamCodexDocumentChat(ctx, cli.root, cli.model, req.Input, emit)
+		})
+	}
 	if req.Input.Chat == nil || len(req.Input.images()) > 0 {
 		return a.configuredCLIAdapter.Stream(ctx, req, emit)
 	}
@@ -166,10 +182,26 @@ func (a codexChatAdapter) Stream(ctx context.Context, req GenerateRequest, emit 
 			a.cache.finish(in.Chat, "", false)
 			return GenerateResult{}, err
 		}
-		return GenerateResult{text, "stop"}, nil
+		return GenerateResult{Text: text, FinishReason: "stop"}, nil
 	})
 }
-func (s *Server) Close() { s.codexChat.close() }
+func (s *Server) Close() {
+	s.documentMu.Lock()
+	s.documentClosed = true
+	var tasks []*documentTask
+	for _, group := range s.documentTasks {
+		for task := range group {
+			task.cancel()
+			tasks = append(tasks, task)
+		}
+	}
+	s.documentMu.Unlock()
+	s.codexChat.close()
+	s.documentCodex.close()
+	for _, task := range tasks {
+		<-task.done
+	}
+}
 
 func (c *codexChatCache) deleteDocument(document string) {
 	c.mu.Lock()

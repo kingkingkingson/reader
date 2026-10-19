@@ -82,7 +82,7 @@ func TestTranslationBatchBoundariesAndContext(t *testing.T) {
 	if len(retry[0].Paragraphs) != 1 || retry[0].Paragraphs[0].BlockID != m.Blocks[1].ID || retry[0].After[0].BlockID != m.Blocks[2].ID {
 		t.Fatal("retry changed boundaries or regenerated completed text")
 	}
-	prompt := translationPrompt(Document{Title: "论文标题", Author: "作者"}, m, batches[0], "")
+	prompt := translationPrompt(Document{Title: "论文标题", Author: "作者"}, m, batches[0], "", "")
 	if !strings.Contains(prompt, `"title":"论文标题"`) || !strings.Contains(prompt, `"author":"作者"`) {
 		t.Fatal("metadata not attached")
 	}
@@ -101,13 +101,13 @@ func TestTranslationGlossaryReachesPrompt(t *testing.T) {
 	if got != "agent 译为智能体，不要译成代理。" {
 		t.Fatalf("glossary = %q", got)
 	}
-	prompt := translationPrompt(Document{Title: "t"}, layoutManifest{}, translationBatch{}, got)
+	prompt := translationPrompt(Document{Title: "t"}, layoutManifest{}, translationBatch{}, "", got)
 	note := strings.Index(prompt, "术语说明：\nagent 译为智能体，不要译成代理。")
 	data := strings.Index(prompt, "输入资料：")
 	if note < 0 || data < 0 || note > data {
 		t.Fatal("glossary missing or placed inside document data")
 	}
-	if strings.Contains(translationPrompt(Document{}, layoutManifest{}, translationBatch{}, " \n\t "), "术语说明") {
+	if strings.Contains(translationPrompt(Document{}, layoutManifest{}, translationBatch{}, "", " \n\t "), "术语说明") {
 		t.Fatal("blank glossary injected")
 	}
 	long, _ := json.Marshal(map[string]any{"translationGlossary": strings.Repeat("字", translationGlossaryLimit+1)})
@@ -437,6 +437,10 @@ func TestTranslationFailureNamesTheCauseAndKeepsTheOutput(t *testing.T) {
 		t.Fatalf("diagnostic not written: %v %v", entries, err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	cut := strings.Index(string(data), "--- raw output ---")
+	if cut < 0 || !strings.Contains(string(data)[:cut], "=== attempt 2:") {
+		t.Fatal("trusted retry statistics must precede all model output")
+	}
 	for _, part := range []string{"batch: p1-b1…p1-b2 (2 paragraphs)", "failed p1-b2: " + want, "=== attempt 2: 1 paragraphs requested, 0 saved, 1 output lines, 1 unparsable", "not json at all"} {
 		if !strings.Contains(string(data), part) {
 			t.Fatalf("diagnostic misses %q:\n%s", part, data)

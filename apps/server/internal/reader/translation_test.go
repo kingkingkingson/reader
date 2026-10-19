@@ -293,3 +293,20 @@ func TestEditTranslationSentence(t *testing.T) {
 		t.Fatalf("bad index accepted: %d %s", bad.Code, bad.Body.String())
 	}
 }
+
+func TestAlgorithmImagesNeverEnterTranslationQueue(t *testing.T) {
+	for _, image := range []string{"", "assets/p7-b9.png"} {
+		b := PDFBlock{ID: "p7-b9", Page: 7, Label: "algorithm", Text: "Algorithm 1: Read phase\n1 Function read(txn, record)", Image: image}
+		m := layoutManifest{Blocks: []PDFBlock{b}}
+		if len(m.translationParagraphs()) != 0 || len(m.translationItems()) != 0 {
+			t.Fatalf("algorithm queued for translation: %+v", b)
+		}
+	}
+}
+
+func TestAlgorithmCaptionUsesImageTranslationRules(t *testing.T) {
+	b := PDFBlock{ID: "p7-b9", Page: 7, Label: "algorithm", Text: "Function read(txn, record)", Caption: "Algorithm 1: Read phase", Image: "assets/p7-b9.png"}
+	if translationSource(b) != b.Caption {
+		t.Fatal("algorithm did not use the image caption path")
+	}
+}

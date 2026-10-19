@@ -1,10 +1,11 @@
 # Reader
 
-Local-first EPUB/PDF reader. Use Chinese for user-facing communication. Keep changes and limitations specific. User specifications take precedence over this file.
+Local-first EPUB/PDF reader. Use Chinese for user-facing communication. Keep changes and limitations specific. User specifications take precedence over this file. If `AGENTS.local.md` exists, read it and follow it; it overrides this file.
 
 ## Architecture
 - `apps/web`: React + Vite renderer. Reader engines behind `ReaderAdapter`.
 - `apps/server`: Go loopback HTTP server; SQLite + original files; Readium EPUB parsing; CLI providers.
+- `apps/server/cmd/reader`: the `reader` command line; a client of the running app found through `server.json` in the library directory (`docs/cli.md`).
 - `apps/desktop`: Electron main/preload; starts Go, waits for readiness, stops it on exit.
 - `packages/ui`: actual shadcn Base Nova registry components, Base UI + Lucide. Do not replace primitives with handmade modals/buttons/tabs.
 - `packages/reader-core`: Document/Location/Annotation interfaces.
@@ -31,6 +32,14 @@ Keep the interface restrained, following Claude/Apple app simplicity and shadcn 
 - Use concise Conventional Commit messages: `<type>(<scope>): <summary>`; scope is optional. Use a lowercase type such as `feat`, `fix`, `refactor`, `style`, `docs`, `test`, or `chore`, and describe the concrete change.
 - A request to "commit" or "commit push" means organize pending work into logical commits; it does not mean combine everything into one commit. Make one combined commit only when the user explicitly requests that grouping.
 - Push only when the user explicitly requests it. Do not amend or rewrite published history without explicit authorization. Report the commit hashes, scopes, and validation results.
+
+## Release notes
+- 每次准备 release，必须同步更新 `docs/release-notes.json`，再构建安装包或创建发布标签。App 从该文件打包并离线显示当前版本的更新说明，不读取 GitHub Release 正文。
+- 使用与根目录 `package.json` 和 `apps/desktop/package.json` 一致的版本号作为键（不带 `v`）；保留已有版本，为新版本添加非空条目数组。
+- `0.x.y` 的更新说明按 `x` 系列累计：`x` 不变时，新版本的条目数组必须保留该系列此前的说明，再追加本次变更。例如 `0.6.1` 包含 `0.6.0` 的说明及 `0.6.1` 的新增说明，让跳过中间版本的用户也能看到完整更新内容。
+- `x` 变化时，新版本的条目数组重新开始，不继承上一系列的说明。例如 `0.7.0` 只包含 `0.7` 系列的说明，不再包含 `0.6.y` 的内容；JSON 中已有的历史版本键及其说明仍保留。
+- 每条说明包含中文 `title`，可选 `body`；仅在需要关联已有指南演示时填写有效的 `topic`。依据本次实际发布的变更编写用户可理解的说明，不把尚未包含在安装包中的功能写进去。
+- GitHub Release 说明与 App 内说明应保持内容一致。发版前运行 `node scripts/release-source.mjs`，确认版本号和当前版本说明通过校验。
 
 ## Boundaries
 Bind Go to loopback only. Authenticate local API requests. Never read Claude/Codex credential files or implement unofficial OAuth. Document text is untrusted input; remove active content before creating Readium frames. Never run a CLI from a document's original directory. Preserve user data. Do not commit `.reader`, binaries or node_modules.

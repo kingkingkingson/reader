@@ -3,6 +3,7 @@ import {
   BookOpen,
   ExternalLink,
   FolderPlus,
+  Globe,
   Loader2,
   MoreHorizontal,
   Pin,
@@ -63,6 +64,7 @@ import {
   paperLink,
   parseCreators,
   relativeTime,
+  wasOpened,
 } from "./format";
 import {
   categoryLeaf,
@@ -219,15 +221,6 @@ export function PaperDetail({
           <BookOpen />
           {percent > 1 ? `继续阅读 · ${percent}%` : "开始阅读"}
         </Button>
-        {snapshotAvailable && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setSnapshotOpen(true)}
-          >
-            查看网页快照
-          </Button>
-        )}
         <div className="paper-detail-actions">
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -277,6 +270,14 @@ export function PaperDetail({
                 docs={[doc]}
                 actions={actions}
                 inPanel
+                extra={
+                  snapshotAvailable && (
+                    <DropdownMenuItem onClick={() => setSnapshotOpen(true)}>
+                      <Globe />
+                      查看网页快照
+                    </DropdownMenuItem>
+                  )
+                }
               />
             </DropdownMenuContent>
           </DropdownMenu>
@@ -382,8 +383,7 @@ export function PaperDetail({
           <dt>添加于</dt>
           <dd className="paper-field-static">
             {relativeTime(doc.createdAt)}
-            {Date.parse(doc.lastOpenedAt) - Date.parse(doc.createdAt) > 1000 &&
-              ` · 上次打开 ${relativeTime(doc.lastOpenedAt)}`}
+            {wasOpened(doc) && ` · 上次打开 ${relativeTime(doc.lastOpenedAt)}`}
           </dd>
         </dl>
         {(doc.noteCount > 0 ||
@@ -628,7 +628,7 @@ function TagChips({ doc }: { doc: Document }) {
     if (tag) void addTag([doc], tag);
   };
   return (
-    <div className="paper-chips" aria-label="标签">
+    <div className="paper-chips paper-tag-chips" aria-label="标签">
       {doc.tags.map((tag) => (
         <Chip
           key={tag}

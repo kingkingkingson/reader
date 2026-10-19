@@ -4,6 +4,472 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/translate-selection":
+        {
+          "post":
+            {
+              "summary": "Translate selected text using at most 30 nearby words on each side",
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "required": ["text"],
+                              "additionalProperties": false,
+                              "properties":
+                                {
+                                  "text":
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 12000,
+                                    },
+                                  "before": { "type": "string" },
+                                  "after": { "type": "string" },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Completed translation; not persisted",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["text"],
+                                  "properties":
+                                    { "text": { "type": "string" } },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/overviews":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Overview job states",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/OverviewJob",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview":
+        {
+          "get":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Persisted source-versioned overview",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                { "regenerate": { "type": "boolean" } },
+                              "required": ["regenerate"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Existing overview or job",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "202":
+                    {
+                      "description": "Overview queued",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentOverview",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/overview/job":
+        {
+          "delete":
+            {
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "204":
+                    {
+                      "description": "Overview job canceled; translation unaffected",
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/diagnostics/events":
+        {
+          "post":
+            {
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": ["level", "event"],
+                              "properties":
+                                {
+                                  "level":
+                                    {
+                                      "type": "string",
+                                      "enum": ["info", "warn", "error"],
+                                    },
+                                  "event":
+                                    {
+                                      "type": "string",
+                                      "maxLength": 80,
+                                      "pattern": "^[a-z][a-z0-9_.-]{0,79}$",
+                                    },
+                                  "detail":
+                                    { "type": "string", "maxLength": 512 },
+                                  "stack":
+                                    { "type": "string", "maxLength": 8000 },
+                                  "requestId":
+                                    { "type": "string", "maxLength": 512 },
+                                  "route":
+                                    { "type": "string", "maxLength": 512 },
+                                  "method":
+                                    { "type": "string", "maxLength": 512 },
+                                  "status": { "type": "number", "minimum": 0 },
+                                  "durationMs":
+                                    { "type": "number", "minimum": 0 },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "204": { "description": "Local diagnostic event recorded" },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/diagnostics/export":
+        {
+          "get":
+            {
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "ZIP containing all retained local logs with redaction and a manifest",
+                      "content":
+                        {
+                          "application/zip":
+                            {
+                              "schema":
+                                { "type": "string", "format": "binary" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/journal-ranks/config":
+        {
+          "get":
+            {
+              "summary": "Read local easyScholar settings without the SecretKey",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Settings and known datasets",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+          "put":
+            {
+              "summary": "Save easyScholar settings; omitted key preserves the saved key",
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "enabled": { "type": "boolean" },
+                                  "filterMode":
+                                    {
+                                      "type": "string",
+                                      "enum": ["include", "exclude"],
+                                    },
+                                  "selected":
+                                    {
+                                      "type": "array",
+                                      "items": { "type": "string" },
+                                    },
+                                  "key": { "type": "string" },
+                                },
+                              "required": ["enabled", "selected"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Saved settings",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankConfig",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/journal-rank":
+        {
+          "get":
+            {
+              "summary": "Query or read cached journal indicators for one paper",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "refresh",
+                    "in": "query",
+                    "schema": { "type": "string", "enum": ["1"] },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Journal indicator result",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/JournalRankResult",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/connector/status":
         {
           "get":
@@ -101,6 +567,119 @@
                 },
             },
         },
+      "/api/import/endnote/scan":
+        {
+          "post":
+            {
+              "description": "Read a saved, closed EndNote SQLite library. Accepts an enl file, enlp package or directory. PDF annotations are counted and converted at import time.",
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "required": ["directory"],
+                              "properties":
+                                { "directory": { "type": "string" } },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "EndNote PDF preview",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/ZoteroScan" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Invalid, locked or unsupported library",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/import/endnote":
+        {
+          "post":
+            {
+              "description": "Copy one previewed PDF, convert supported embedded marks into Reader annotations and remove only those marks from the copy. Source files are unchanged.",
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "required": ["scanId", "entryId"],
+                              "properties":
+                                {
+                                  "scanId": { "type": "string" },
+                                  "entryId": { "type": "string" },
+                                  "library":
+                                    {
+                                      "type": "string",
+                                      "enum": ["papers", "books"],
+                                    },
+                                  "allowLarge": { "type": "boolean" },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Import result",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/ZoteroImportResult",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Import failed or large-paper confirmation required",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
       "/api/import/zotero":
         {
           "get":
@@ -154,6 +733,14 @@
                                 {
                                   "scanId": { "type": "string" },
                                   "entryId": { "type": "string" },
+                                  "library":
+                                    {
+                                      "type": "string",
+                                      "enum": ["papers", "books"],
+                                      "default": "papers",
+                                    },
+                                  "allowLarge":
+                                    { "type": "boolean", "default": false },
                                 },
                               "required": ["scanId", "entryId"],
                             },
@@ -362,12 +949,12 @@
                                   "library":
                                     {
                                       "enum": ["books", "papers"],
-                                      "description": "Target library. Papers accept PDFs up to 50 MB and 150 pages. Defaults to books.",
+                                      "description": "Target library. Papers accept PDFs; over 100 MB or 100 pages requires confirmation. Defaults to books.",
                                     },
                                   "allowLarge":
                                     {
                                       "enum": ["1"],
-                                      "description": "Confirms a paper over 50 pages. Without it such a paper fails with 409, code large-paper and its page count.",
+                                      "description": "Confirms a paper over 100 pages or 100 MB. Without it such a paper fails with 409, code large-paper and its page count.",
                                     },
                                 },
                               "required": ["file"],
@@ -1012,6 +1599,145 @@
                 ],
             },
         },
+      "/api/documents/{id}/text":
+        {
+          "get":
+            {
+              "description": "Readable text in reading order for the command line. PDFs have text only after layout parsing; units are pages for a PDF and reading-order chapters for an EPUB.",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/DocumentText" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "from",
+                    "required": false,
+                    "schema": { "type": "integer", "minimum": 1 },
+                  },
+                  {
+                    "in": "query",
+                    "name": "to",
+                    "required": false,
+                    "schema": { "type": "integer", "minimum": 1 },
+                  },
+                  {
+                    "in": "query",
+                    "name": "side",
+                    "required": false,
+                    "schema":
+                      {
+                        "type": "string",
+                        "enum": ["source", "translation", "both"],
+                        "default": "source",
+                      },
+                  },
+                ],
+            },
+        },
+      "/api/search":
+        {
+          "get":
+            {
+              "description": "Search the source and translated text of every document. A block matches when it contains all whitespace-separated terms, ignoring case.",
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/LibrarySearchHit",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "query",
+                    "name": "q",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "library",
+                    "required": false,
+                    "schema": { "type": "string", "enum": ["books", "papers"] },
+                  },
+                  {
+                    "in": "query",
+                    "name": "document",
+                    "required": false,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "limit",
+                    "required": false,
+                    "schema":
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 20,
+                      },
+                  },
+                ],
+            },
+        },
       "/api/documents/{id}/messages":
         {
           "get":
@@ -1139,8 +1865,19 @@
                                           "pattern": "^p[1-9][0-9]*-b[1-9][0-9]*$",
                                         },
                                     },
+                                  "userMessageId":
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{32}$",
+                                      "description": "Stable client-generated user message ID. Reuse only for explicit regeneration of the same unanswered last question, with unchanged prompt, context, references, attachments and reading location. The server uses current model settings, does not insert a duplicate question, and returns 409 if the turn has an answer or later messages. Omit for legacy clients.",
+                                    },
                                   "prompt": { "type": "string" },
                                   "context": { "type": "string" },
+                                  "readingLocation":
+                                    {
+                                      "$ref": "#/components/schemas/DocumentLocation",
+                                      "description": "Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence.",
+                                    },
                                   "references":
                                     {
                                       "type": "array",
@@ -1158,6 +1895,25 @@
                                               "location":
                                                 {
                                                   "$ref": "#/components/schemas/DocumentLocation",
+                                                },
+                                              "sourceId": { "type": "string" },
+                                              "pageImage":
+                                                {
+                                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                                },
+                                              "corpusRevision":
+                                                { "type": "string" },
+                                              "contentHash":
+                                                { "type": "string" },
+                                              "precision":
+                                                {
+                                                  "type": "string",
+                                                  "enum":
+                                                    [
+                                                      "page",
+                                                      "block",
+                                                      "paragraph",
+                                                    ],
                                                 },
                                             },
                                           "required": ["text", "location"],
@@ -1425,7 +2181,14 @@
                                   "action":
                                     {
                                       "type": "string",
-                                      "enum": ["start", "pause", "resume"],
+                                      "enum":
+                                        [
+                                          "start",
+                                          "pause",
+                                          "resume",
+                                          "retranslate",
+                                        ],
+                                      "description": "retranslate restarts completed paper text with saved current translation choices, retaining previous translations until replacement succeeds. Books keep chapter translation controls.",
                                     },
                                 },
                             },
@@ -1798,13 +2561,21 @@
                     "name": "capability",
                     "in": "query",
                     "description": "Test text or vision independently. Omit to run both. Vision requires a successful text check for the current configuration.",
-                    "schema": { "type": "string", "enum": ["text", "vision"] },
+                    "schema":
+                      { "type": "string", "enum": ["text", "vision", "tools"] },
                   },
                   {
                     "name": "model",
                     "in": "query",
                     "description": 'Required for the api provider, which is checked one model at a time; the result is stored under capabilities["api:<model>"].',
                     "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "timeoutSeconds",
+                    "in": "query",
+                    "description": "Per-stage wait limit for API model text/vision probes only. Omit or use 0 for defaults (text 45 seconds, vision 90 seconds). Does not change generation timeouts or saved connection settings.",
+                    "schema":
+                      { "type": "integer", "minimum": 0, "maximum": 600 },
                   },
                   {
                     "name": "provider",
@@ -1824,6 +2595,149 @@
                             {
                               "schema":
                                 { "$ref": "#/components/schemas/AICapability" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/translations/export":
+        {
+          "get":
+            {
+              "summary": "Export saved PDF or EPUB translations as Markdown or a ZIP with local images",
+              "description": "Uses completed visible translations, including previous results during retranslation. Marks untranslated or unparsed content. Does not start translation.",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "format",
+                    "in": "query",
+                    "schema":
+                      {
+                        "type": "string",
+                        "enum": ["markdown", "zip"],
+                        "default": "markdown",
+                      },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Download; Markdown excludes images, ZIP includes translation.md and assets/",
+                      "content":
+                        {
+                          "text/markdown": { "schema": { "type": "string" } },
+                          "application/zip":
+                            {
+                              "schema":
+                                { "type": "string", "format": "binary" },
+                            },
+                        },
+                    },
+                  "409":
+                    {
+                      "description": "No completed translation or source not ready",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "summary": "Export translations together with selected notes and annotations",
+              "description": "Appends client-rendered Markdown for the selected notes, annotations, bookmarks or chat to the same document. This is a download only; it does not save the supplied content.",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "name": "format",
+                    "in": "query",
+                    "schema":
+                      {
+                        "type": "string",
+                        "enum": ["markdown", "zip"],
+                        "default": "markdown",
+                      },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "description": "JSON body limited to 16 MiB",
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties":
+                                {
+                                  "notesMarkdown":
+                                    {
+                                      "type": "string",
+                                      "description": "Selected content without a document title; appended after the translation",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Markdown or ZIP containing the combined Markdown and local images",
+                      "content":
+                        {
+                          "text/markdown": { "schema": { "type": "string" } },
+                          "application/zip":
+                            {
+                              "schema":
+                                { "type": "string", "format": "binary" },
                             },
                         },
                     },
@@ -2498,7 +3412,7 @@
                     "in": "path",
                     "name": "key",
                     "required": true,
-                    "schema": { "enum": ["library", "guide"] },
+                    "schema": { "enum": ["library", "guide", "shortcuts"] },
                   },
                 ],
               "responses":
@@ -2540,7 +3454,7 @@
                     "in": "path",
                     "name": "key",
                     "required": true,
-                    "schema": { "enum": ["library", "guide"] },
+                    "schema": { "enum": ["library", "guide", "shortcuts"] },
                   },
                 ],
               "requestBody":
@@ -3088,7 +4002,18 @@
                           "schema":
                             {
                               "type": "object",
-                              "properties": { "ref": { "type": "string" } },
+                              "properties":
+                                {
+                                  "ref": { "type": "string" },
+                                  "library":
+                                    {
+                                      "type": "string",
+                                      "enum": ["papers", "books"],
+                                      "default": "papers",
+                                    },
+                                  "allowLarge":
+                                    { "type": "boolean", "default": false },
+                                },
                               "required": ["ref"],
                             },
                         },
@@ -3410,12 +4335,334 @@
                 },
             },
         },
+      "/api/documents/{id}/messages/{message}/sources/{source}":
+        {
+          "get":
+            {
+              "summary": "Validate a persisted original-text citation before navigation",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "message",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "source",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Original source is still current",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["valid"],
+                                  "properties":
+                                    { "valid": { "type": "boolean" } },
+                                },
+                            },
+                        },
+                    },
+                  "404":
+                    {
+                      "description": "Document, message or source is unavailable",
+                    },
+                  "409":
+                    {
+                      "description": "Original text or citation version has changed",
+                    },
+                },
+            },
+        },
     },
   "components":
     {
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "OverviewContent":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "summary": { "type": "string" },
+                  "findings":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                          "required": ["text", "blockIds"],
+                        },
+                    },
+                  "limitations":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "text": { "type": "string" },
+                              "blockIds":
+                                {
+                                  "type": "array",
+                                  "items": { "type": "string" },
+                                },
+                            },
+                          "required": ["text", "blockIds"],
+                        },
+                    },
+                  "terms": { "type": "array", "items": { "type": "string" } },
+                },
+              "required": ["summary", "findings", "limitations", "terms"],
+            },
+          "OverviewSection":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "key": { "type": "string" },
+                  "title": { "type": "string" },
+                  "firstBlockId": { "type": "string" },
+                  "lastBlockId": { "type": "string" },
+                  "location":
+                    { "type": "object", "additionalProperties": true },
+                  "passageCount": { "type": "integer" },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                },
+              "required":
+                [
+                  "key",
+                  "title",
+                  "firstBlockId",
+                  "lastBlockId",
+                  "location",
+                  "passageCount",
+                  "content",
+                ],
+            },
+          "DocumentOverview":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "stale": { "type": "boolean" },
+                  "sources":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "required": ["blockId", "label", "location"],
+                          "properties":
+                            {
+                              "blockId": { "type": "string" },
+                              "label": { "type": "string" },
+                              "location":
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true,
+                                },
+                            },
+                        },
+                    },
+
+                  "documentId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "compilerVersion": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "content": { "$ref": "#/components/schemas/OverviewContent" },
+                  "sections":
+                    {
+                      "type": "array",
+                      "items":
+                        { "$ref": "#/components/schemas/OverviewSection" },
+                    },
+                  "coverage":
+                    {
+                      "type": "object",
+                      "properties":
+                        {
+                          "status": { "type": "string" },
+                          "totalUnits": { "type": "integer" },
+                          "searchableUnits": { "type": "integer" },
+                          "missingRanges":
+                            { "type": "array", "items": { "type": "string" } },
+                          "warnings":
+                            { "type": "array", "items": { "type": "string" } },
+                        },
+                      "required":
+                        [
+                          "status",
+                          "totalUnits",
+                          "searchableUnits",
+                          "missingRanges",
+                          "warnings",
+                        ],
+                    },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                  "updatedAt": { "type": "string" },
+                  "error": { "type": "string" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "corpusRevision",
+                  "compilerVersion",
+                  "status",
+                  "sections",
+                  "coverage",
+                  "compiledPassages",
+                  "totalPassages",
+                  "updatedAt",
+                ],
+            },
+          "OverviewJob":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "missing",
+                          "queued",
+                          "running",
+                          "waiting",
+                          "complete",
+                          "partial",
+                          "failed",
+                          "canceled",
+                          "stale",
+                        ],
+                    },
+                  "error": { "type": "string" },
+                  "compiledPassages": { "type": "integer" },
+                  "totalPassages": { "type": "integer" },
+                },
+              "required":
+                [
+                  "documentId",
+                  "status",
+                  "error",
+                  "compiledPassages",
+                  "totalPassages",
+                ],
+            },
+
+          "JournalRankConfig":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "enabled": { "type": "boolean" },
+                  "hasKey": { "type": "boolean" },
+                  "filterMode":
+                    { "type": "string", "enum": ["include", "exclude"] },
+                  "selected":
+                    { "type": "array", "items": { "type": "string" } },
+                  "available":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "key": { "type": "string" },
+                              "name": { "type": "string" },
+                            },
+                          "required": ["key", "name"],
+                        },
+                    },
+                },
+              "required":
+                ["enabled", "hasKey", "filterMode", "selected", "available"],
+            },
+          "JournalRankResult":
+            {
+              "type": "object",
+              "properties":
+                {
+                  "status":
+                    {
+                      "type": "string",
+                      "enum":
+                        [
+                          "found",
+                          "notFound",
+                          "notApplicable",
+                          "noVenue",
+                          "disabled",
+                        ],
+                    },
+                  "checkedAt": { "type": "string" },
+                  "badges":
+                    {
+                      "type": "array",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "key": { "type": "string" },
+                              "name": { "type": "string" },
+                              "value": { "type": "string" },
+                              "subject": { "type": "string" },
+                              "year": { "type": "string" },
+                            },
+                          "required": ["key", "name", "value"],
+                        },
+                    },
+                },
+              "required": ["status", "badges"],
+            },
           "ZoteroEntry":
             {
               "type": "object",
@@ -3483,6 +4730,30 @@
               "required":
                 ["documentId", "status", "notes", "annotations", "warnings"],
             },
+          "PageImageEvidence":
+            {
+              "type": "object",
+              "required":
+                [
+                  "page",
+                  "width",
+                  "height",
+                  "bytes",
+                  "sourceId",
+                  "corpusRevision",
+                  "contentHash",
+                ],
+              "properties":
+                {
+                  "page": { "type": "integer", "minimum": 1 },
+                  "width": { "type": "integer" },
+                  "height": { "type": "integer" },
+                  "bytes": { "type": "integer" },
+                  "sourceId": { "type": "string" },
+                  "corpusRevision": { "type": "string" },
+                  "contentHash": { "type": "string" },
+                },
+            },
           "DocumentLocation":
             {
               "oneOf":
@@ -3496,6 +4767,17 @@
                         "x": { "type": "number" },
                         "y": { "type": "number" },
                         "quote": { "type": "string" },
+                        "quoteContext":
+                          {
+                            "type": "object",
+                            "description": "Search paragraph context and UTF-16 offset of the selected match.",
+                            "properties":
+                              {
+                                "text": { "type": "string" },
+                                "start": { "type": "integer", "minimum": 0 },
+                              },
+                            "required": ["text", "start"],
+                          },
                         "rects":
                           {
                             "type": "array",
@@ -3681,6 +4963,93 @@
                   },
                 ],
             },
+          "DocumentText":
+            {
+              "type": "object",
+              "required": ["documentId", "type", "units", "parsed", "blocks"],
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "type": { "type": "string", "enum": ["epub", "pdf"] },
+                  "units":
+                    {
+                      "type": "integer",
+                      "description": "Page count of a PDF or chapter count of an EPUB.",
+                    },
+                  "parsed":
+                    {
+                      "type": "boolean",
+                      "description": "False for a PDF without a layout index; it then has no blocks.",
+                    },
+                  "parsedPages":
+                    {
+                      "type": "array",
+                      "items": { "type": "integer" },
+                      "description": "Parsed pages of a partly parsed book; absent means all.",
+                    },
+                  "blocks":
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TextBlock" },
+                    },
+                },
+            },
+          "TextBlock":
+            {
+              "type": "object",
+              "required": ["id", "unit", "label", "text"],
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "unit":
+                    {
+                      "type": "integer",
+                      "description": "Page or chapter, starting at 1.",
+                    },
+                  "href":
+                    {
+                      "type": "string",
+                      "description": "EPUB chapter resource.",
+                    },
+                  "label": { "type": "string" },
+                  "text":
+                    {
+                      "type": "string",
+                      "description": "Source text, or a figure caption; empty on the translation side.",
+                    },
+                  "translation":
+                    {
+                      "type": "string",
+                      "description": "Completed translation, when requested.",
+                    },
+                },
+            },
+          "LibrarySearchHit":
+            {
+              "type": "object",
+              "required":
+                [
+                  "documentId",
+                  "title",
+                  "type",
+                  "unit",
+                  "blockId",
+                  "side",
+                  "excerpt",
+                ],
+              "properties":
+                {
+                  "documentId": { "type": "string" },
+                  "title": { "type": "string" },
+                  "type": { "type": "string", "enum": ["epub", "pdf"] },
+                  "unit": { "type": "integer" },
+                  "href": { "type": "string" },
+                  "blockId": { "type": "string" },
+                  "side":
+                    { "type": "string", "enum": ["source", "translation"] },
+                  "excerpt": { "type": "string" },
+                },
+            },
           "SearchResult":
             {
               "type": "object",
@@ -3702,8 +5071,18 @@
                   "documentId": { "type": "string" },
                   "role": { "enum": ["user", "assistant"] },
                   "content": { "type": "string" },
+                  "reasoning":
+                    {
+                      "type": "string",
+                      "description": "Provider-returned thinking displayed separately from the final answer.",
+                    },
                   "createdAt": { "type": "string" },
                   "context": { "type": "string" },
+                  "readingLocation":
+                    {
+                      "$ref": "#/components/schemas/DocumentLocation",
+                      "description": "Original reading position at send time, retained independently of current navigation and source citations.",
+                    },
                   "attachments":
                     {
                       "type": "array",
@@ -3733,6 +5112,18 @@
                               "location":
                                 {
                                   "$ref": "#/components/schemas/DocumentLocation",
+                                },
+                              "sourceId": { "type": "string" },
+                              "pageImage":
+                                {
+                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                },
+                              "corpusRevision": { "type": "string" },
+                              "contentHash": { "type": "string" },
+                              "precision":
+                                {
+                                  "type": "string",
+                                  "enum": ["page", "block", "paragraph"],
                                 },
                             },
                           "required": ["text", "location"],
@@ -3765,6 +5156,40 @@
                 [
                   {
                     "type": "object",
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "const": "reasoning" },
+                        "data":
+                          {
+                            "type": "object",
+                            "required": ["text"],
+                            "properties": { "text": { "type": "string" } },
+                          },
+                      },
+                  },
+
+                  {
+                    "type": "object",
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "const": "draft" },
+                        "data":
+                          {
+                            "type": "object",
+                            "required": ["text", "reset"],
+                            "properties":
+                              {
+                                "text": { "type": "string" },
+                                "reset": { "type": "boolean" },
+                              },
+                          },
+                      },
+                  },
+
+                  {
+                    "type": "object",
                     "additionalProperties": false,
                     "required": ["event", "data"],
                     "properties":
@@ -3782,6 +5207,31 @@
                                     "type": "string",
                                     "enum": ["reading", "reading-image"],
                                   },
+                              },
+                          },
+                      },
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["event", "data"],
+                    "properties":
+                      {
+                        "event": { "type": "string", "enum": ["activity"] },
+                        "data":
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["phase", "message"],
+                            "properties":
+                              {
+                                "phase":
+                                  {
+                                    "type": "string",
+                                    "enum": ["indexing", "reading", "writing"],
+                                  },
+                                "message": { "type": "string" },
+                                "tool": { "type": "string" },
                               },
                           },
                       },
@@ -3880,6 +5330,17 @@
               "properties":
                 {
                   "enabled": { "type": "boolean" },
+                  "manualTranslation": { "type": "boolean", "readOnly": true },
+                  "retranslating": { "type": "boolean", "readOnly": true },
+                  "layoutRevision": { "type": "string", "readOnly": true },
+                  "autoTranslateMaxPages":
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 150,
+                      "multipleOf": 10,
+                      "readOnly": true,
+                    },
                   "epubManual":
                     {
                       "type": "boolean",
@@ -3965,6 +5426,18 @@
               "properties":
                 {
                   "text": { "type": "boolean" },
+                  "textFirstOutputMs":
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Last text probe's time to first nonempty reasoning or text output, excluding catalog lookup. Omitted if no output was observed. This is a single observation, not a provider benchmark.",
+                    },
+                  "visionFirstOutputMs":
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Last vision probe's time to first nonempty reasoning or text output, excluding catalog lookup. Omitted if no output was observed.",
+                    },
                   "pendingVision":
                     {
                       "type": "boolean",
@@ -3973,6 +5446,18 @@
                   "vision": { "type": "boolean" },
                   "checkedAt": { "type": "string" },
                   "error": { "type": "string" },
+                  "tools":
+                    {
+                      "type": "string",
+                      "enum": ["passed", "unsupported", "failed"],
+                      "description": "Independent structured tool-call capability; missing means not checked.",
+                    },
+                  "toolError": { "type": "string" },
+                  "toolSchemaVersion":
+                    {
+                      "type": "string",
+                      "description": "Server-owned fingerprint of the checked tool protocol and schemas.",
+                    },
                 },
               "required": ["text", "vision", "checkedAt"],
             },
@@ -3981,6 +5466,12 @@
               "type": "object",
               "properties":
                 {
+                  "protocol":
+                    {
+                      "type": "string",
+                      "enum": ["auto", "openai", "anthropic"],
+                      "default": "auto",
+                    },
                   "url": { "type": "string" },
                   "model": { "type": "string" },
                   "key": { "type": "string", "writeOnly": true },
@@ -3994,6 +5485,32 @@
               "required": ["id", "name", "description", "isDefault"],
               "properties":
                 {
+                  "contextWindow":
+                    {
+                      "type": "integer",
+                      "description": "Provider-reported context capacity; omitted when unavailable",
+                    },
+                  "maxOutputTokens": { "type": "integer" },
+
+                  "effortInfo":
+                    {
+                      "type": "object",
+                      "required": ["mode", "note"],
+                      "properties":
+                        {
+                          "mode":
+                            {
+                              "type": "string",
+                              "enum": ["levels", "budget", "fixed", "unknown"],
+                            },
+                          "note": { "type": "string" },
+                          "mappings":
+                            {
+                              "type": "object",
+                              "additionalProperties": { "type": "string" },
+                            },
+                        },
+                    },
                   "id": { "type": "string" },
                   "name": { "type": "string" },
                   "description": { "type": "string" },
@@ -4050,6 +5567,12 @@
                       "type": "object",
                       "description": "Translation model by provider. Empty uses the provider's fast-tier recommendation.",
                       "additionalProperties": { "type": "string" },
+                    },
+                  "translationPrompt":
+                    {
+                      "type": "string",
+                      "maxLength": 6000,
+                      "description": "Translation style and terminology preferences. Empty resets to default; omission preserves the saved value. Does not replace source-alignment or output-format rules.",
                     },
                   "translationEfforts":
                     {

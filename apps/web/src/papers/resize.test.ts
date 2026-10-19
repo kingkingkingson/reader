@@ -29,3 +29,12 @@ it("keeps the detail panel within its range", () => {
   expect(clampDetailWidth(455.6)).toBe(456);
   expect(clampDetailWidth(2000)).toBe(720);
 });
+
+it("resizes a reordered boundary with the flexible title on the right", () => {
+  expect(
+    resizeBoundary({ authors: 160, title: 200 }, "authors", "title", 30),
+  ).toEqual({ authors: 190 });
+  expect(
+    resizeBoundary({ authors: 160, title: 200 }, "authors", "title", 90),
+  ).toEqual({ authors: 200 });
+});

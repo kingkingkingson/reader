@@ -2,6 +2,7 @@ package reader
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -32,7 +33,7 @@ func translationSource(b PDFBlock) string {
 		return ""
 	}
 	switch b.Label {
-	case "reference", "reference_content", "algorithm", "display_formula", "inline_formula", "formula_number", "header", "footer", "number":
+	case "reference", "reference_content", "display_formula", "inline_formula", "formula_number", "header", "footer", "number":
 		return ""
 	}
 	if isImageAsset(b) {
@@ -57,11 +58,24 @@ func newTranslation(b PDFBlock) TranslationBlock {
 
 // Book paragraphs stay idle until requested; PDF papers translate in full.
 func (s *Server) translations(documentID string, m translationInput) ([]TranslationBlock, error) {
+	return s.translationRecords(documentID, m, false)
+}
+
+func (s *Server) visibleTranslations(documentID string, m translationInput) ([]TranslationBlock, error) {
+	return s.translationRecords(documentID, m, true)
+}
+
+func (s *Server) translationRecords(documentID string, m translationInput, visible bool) ([]TranslationBlock, error) {
 	d, err := s.Store.Document(documentID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.Store.DB.Query("SELECT body FROM translations WHERE document_id=?", documentID)
+	query := "SELECT body FROM translations WHERE document_id=?"
+	if visible {
+		query = `SELECT COALESCE(previous.body,t.body) FROM translations t LEFT JOIN translation_previous previous
+ON previous.document_id=t.document_id AND previous.block_id=t.block_id AND previous.source_hash=t.source_hash WHERE t.document_id=?`
+	}
+	rows, err := s.Store.DB.Query(query, documentID)
 	if err != nil {
 		return nil, err
 	}
@@ -124,11 +138,34 @@ func (s *Server) saveTranslation(documentID string, t TranslationBlock) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.Store.DB.Exec(`INSERT INTO translations(document_id,block_id,source_hash,status,body) VALUES(?,?,?,?,?) ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET status=excluded.status,body=excluded.body`, documentID, t.BlockID, t.SourceHash, t.Status, string(body))
-	if err == nil {
-		s.publishTranslation(documentID, t)
+	tx, err := s.Store.DB.Begin()
+	if err != nil {
+		return err
 	}
-	return err
+	defer tx.Rollback()
+	if _, err = tx.Exec(`INSERT INTO translations(document_id,block_id,source_hash,status,body) VALUES(?,?,?,?,?) ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET status=excluded.status,body=excluded.body`, documentID, t.BlockID, t.SourceHash, t.Status, string(body)); err != nil {
+		return err
+	}
+	visible := t
+	if t.Status == "complete" {
+		_, err = tx.Exec("DELETE FROM translation_previous WHERE document_id=? AND block_id=? AND source_hash=?", documentID, t.BlockID, t.SourceHash)
+	} else {
+		var previous string
+		err = tx.QueryRow("SELECT body FROM translation_previous WHERE document_id=? AND block_id=? AND source_hash=?", documentID, t.BlockID, t.SourceHash).Scan(&previous)
+		if err == nil {
+			err = json.Unmarshal([]byte(previous), &visible)
+		} else if errors.Is(err, sql.ErrNoRows) {
+			err = nil
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	s.publishTranslation(documentID, visible)
+	return nil
 }
 func (s *Server) documentTranslations(w http.ResponseWriter, r *http.Request) {
 	d, err := s.Store.Document(r.PathValue("id"))
@@ -141,7 +178,7 @@ func (s *Server) documentTranslations(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, []TranslationBlock{})
 		return
 	}
-	items, err := s.translations(d.ID, m)
+	items, err := s.visibleTranslations(d.ID, m)
 	if err != nil {
 		fail(w, 500, "无法读取译文")
 		return

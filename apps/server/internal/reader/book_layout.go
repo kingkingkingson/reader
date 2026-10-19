@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +27,27 @@ type PageRange struct {
 
 // runLayout parses the PDF into work. from and to bound a book chapter; zero
 // parses the whole document.
-func (s *Server) runLayout(ctx context.Context, d Document, work string, from, to int, p *Processing) error {
+func (s *Server) runLayout(ctx context.Context, d Document, work string, from, to int, p *Processing) (result error) {
+	runID := id()
+	started := time.Now()
+	lastStage := "prepare"
+	exitCode := -1
+	stderr := &layoutStderr{}
+	s.diagnosticEvent(slog.LevelInfo, "pdf.parse.start", "runId", runID, "documentId", d.ID, "fromPage", from, "toPage", to)
+	defer func() {
+		level := slog.LevelInfo
+		outcome := "complete"
+		if result != nil {
+			level = slog.LevelError
+			outcome = "failed"
+		}
+		s.diagnosticEvent(level, "pdf.parse.finish", "runId", runID, "documentId", d.ID,
+			"stage", lastStage, "outcome", outcome, "exitCode", exitCode,
+			"exitCodeHex", layoutExitHex(exitCode), "nativeDiagnostics", stderr.nativeCodes(), "nativeTrace", stderr.nativeTrace(),
+			"durationMs", time.Since(started).Milliseconds(), "stderrBytes", stderr.total,
+			"stderrFingerprint", stderr.fingerprint(), "stderrTruncated", stderr.total > int64(len(stderr.tail)),
+			"canceled", ctx.Err() != nil)
+	}()
 	worker := os.Getenv("READER_PROCESSOR")
 	node := os.Getenv("READER_NODE")
 	if worker == "" || node == "" {
@@ -43,30 +63,48 @@ func (s *Server) runLayout(ctx context.Context, d Document, work string, from, t
 		args = append(args, "--from-page", strconv.Itoa(from), "--to-page", strconv.Itoa(to))
 	}
 	cmd := exec.CommandContext(child, node, args...)
-	cmd.Env = append(os.Environ(), "ELECTRON_RUN_AS_NODE=1", "NODE_USE_ENV_PROXY=1")
+	// Disable ONNX telemetry before loading native modules to avoid its exit-time teardown crash.
+	cmd.Env = append(os.Environ(), "ELECTRON_RUN_AS_NODE=1", "NODE_USE_ENV_PROXY=1", "ORT_DISABLE_TELEMETRY=1")
 	cmd.WaitDelay = 3 * time.Second
 	cmd.Dir = s.Store.Root
-	cmd.Stderr = io.Discard
+	cmd.Stderr = stderr
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
 	}
+	lastStage = "process_start"
 	if err = cmd.Start(); err != nil {
 		return errors.New("无法启动本地 PDF 解析程序")
 	}
+	lastStage = "bootstrap"
+	s.diagnosticEvent(slog.LevelInfo, "pdf.parse.spawned", "runId", runID, "documentId", d.ID, "pid", cmd.Process.Pid)
 	scan := bufio.NewScanner(out)
 	scan.Buffer(make([]byte, 4096), 1<<20)
 	var saveErr error
 	for scan.Scan() {
-		var event struct {
-			Event string `json:"event"`
-			Page  int    `json:"page"`
-			Total int    `json:"total"`
-		}
+		var event layoutDiagnostic
 		if json.Unmarshal(scan.Bytes(), &event) != nil {
 			continue
 		}
 		switch event.Event {
+		case "diagnostic":
+			if !event.valid() {
+				continue
+			}
+			lastStage = event.Stage
+			level := slog.LevelInfo
+			if event.Status == "failed" {
+				level = slog.LevelError
+			}
+			s.diagnosticEvent(level, "pdf.parse.stage", "runId", runID, "documentId", d.ID,
+				"stage", event.Stage, "status", event.Status, "page", event.Page,
+				"durationMs", event.DurationMs, "errorType", event.ErrorType,
+				"errorCode", event.ErrorCode, "errorFingerprint", event.ErrorFingerprint,
+				"onnxVersion", event.OnnxVersion, "nodeVersion", event.NodeVersion, "electronVersion", event.ElectronVersion,
+				"rssBytes", event.RSSBytes, "heapUsedBytes", event.HeapUsedBytes,
+				"externalBytes", event.ExternalBytes, "freeMemoryBytes", event.FreeMemoryBytes,
+				"totalMemoryBytes", event.TotalMemoryBytes)
+			continue
 		case "page":
 			p.PagesDone, p.PagesTotal = event.Page, event.Total
 			p.Detail = fmt.Sprintf("已解析 %d / %d 页", event.Page, event.Total)
@@ -86,6 +124,12 @@ func (s *Server) runLayout(ctx context.Context, d Document, work string, from, t
 		cancel()
 	}
 	err = cmd.Wait()
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
+	if child.Err() == context.DeadlineExceeded {
+		lastStage = "timeout"
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

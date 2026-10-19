@@ -9,9 +9,12 @@ import {
   paperLink,
   parseCreators,
   shortTitle,
+  publicationDate,
+  wasOpened,
 } from "./format";
 import {
   categoryTree,
+  defaultColumns,
   cleanCategory,
   duplicateGroups,
   pairKey,
@@ -437,4 +440,164 @@ it("excludes paused and disabled work from the processing view", () => {
     expect(matches({ enabled: true, status })).toBe(true);
   for (const status of ["complete", "failed"] as const)
     expect(matches({ enabled: true, status })).toBe(false);
+});
+
+it("preserves partial publication dates and rejects invalid calendar dates", () => {
+  expect(publicationDate("2024")?.label).toBe("2024");
+  expect(publicationDate("2024-2")?.label).toBe("2024-02");
+  expect(publicationDate("2024-2-29")?.label).toBe("2024-02-29");
+  for (const value of [
+    "",
+    "unknown",
+    "2023-02-29",
+    "2024-04-31",
+    "2024-13",
+    "0000",
+    "2024-00-01",
+  ]) {
+    expect(publicationDate(value)).toBeUndefined();
+  }
+});
+
+it("sorts full and partial dates chronologically with unknown dates last in both directions", () => {
+  const docs = [
+    "2024-10-02",
+    "2024",
+    "2024-2",
+    "2024-02-29",
+    "",
+    "invalid",
+  ].map((date, i) =>
+    paper({ id: String(i), title: String(i), metadata: { date } }),
+  );
+  expect(sortPapers(docs, "published").map((d) => d.id)).toEqual([
+    "0",
+    "3",
+    "2",
+    "1",
+    "4",
+    "5",
+  ]);
+  expect(sortPapers(docs, "published", true).map((d) => d.id)).toEqual([
+    "1",
+    "2",
+    "3",
+    "0",
+    "4",
+    "5",
+  ]);
+  // Year sorting must not silently compare the month or day.
+  expect(sortPapers(docs, "year").map((d) => d.id)).toEqual([
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+  ]);
+  expect(sortPapers([...docs].reverse(), "published").map((d) => d.id)).toEqual(
+    ["0", "3", "2", "1", "4", "5"],
+  );
+});
+
+it("keeps never-opened imports after opened papers and uses real timestamps across offsets", () => {
+  const docs = [
+    paper({ id: "new", lastOpenedAt: "", createdAt: "2026-10-16T00:00:00Z" }),
+    paper({ id: "legacy", title: "Legacy" }),
+    paper({ id: "later", lastOpenedAt: "2026-10-15T00:00:00Z" }),
+    paper({ id: "earlier", lastOpenedAt: "2026-10-15T07:00:00+08:00" }),
+  ];
+  expect(sortPapers(docs, "opened").map((d) => d.id)).toEqual([
+    "later",
+    "earlier",
+    "new",
+    "legacy",
+  ]);
+  expect(sortPapers(docs, "opened", true).map((d) => d.id)).toEqual([
+    "earlier",
+    "later",
+    "new",
+    "legacy",
+  ]);
+  expect(recentPapers(docs, []).map((d) => d.id)).toEqual(["later", "earlier"]);
+  expect(wasOpened(paper({ progress: { type: "pdf", page: 1 } }))).toBe(true);
+});
+
+it("combines temporary AND/OR tags with the current view and every search term", () => {
+  const docs = [
+    paper({
+      id: "a",
+      title: "Alpha",
+      folders: ["ML"],
+      tags: ["RAG", "Agent"],
+      metadata: { abstract: "retrieval study" },
+    }),
+    paper({
+      id: "b",
+      title: "Beta",
+      folders: ["ML"],
+      tags: ["rag"],
+      metadata: { abstract: "retrieval study" },
+    }),
+    paper({
+      id: "c",
+      title: "Gamma",
+      tags: ["Agent"],
+      metadata: { abstract: "retrieval study" },
+    }),
+    paper({
+      id: "d",
+      title: "RAG Agent",
+      folders: ["ML"],
+      tags: ["agentic"],
+      metadata: { abstract: "retrieval study" },
+    }),
+  ];
+  const jobs = new Map<string, Processing>();
+  const ids = (match: "all" | "any", tags = ["rag", "AGENT"]) =>
+    filterPapers(docs, "folder:ML", "retrieval STUDY", "title", jobs, {
+      tagFilter: { tags, match },
+    }).map((d) => d.id);
+  expect(ids("all")).toEqual(["a"]);
+  expect(ids("any")).toEqual(["a", "b"]);
+  expect(ids("all", [])).toEqual(["a", "b", "d"]);
+  expect(ids("any", ["missing"])).toEqual([]);
+  expect(docs[0].tags).toEqual(["RAG", "Agent"]);
+});
+
+it("applies temporary tags after finding duplicate groups", () => {
+  const docs = [
+    paper({
+      id: "a",
+      title: "Same study",
+      tags: ["RAG"],
+      metadata: { doi: "10.1234/same" },
+    }),
+    paper({
+      id: "b",
+      title: "Same study",
+      tags: ["Agent"],
+      metadata: { doi: "10.1234/same" },
+    }),
+    paper({ id: "c", title: "Different study", tags: ["RAG"] }),
+  ];
+  expect(
+    filterPapers(docs, "duplicates", "", "title", new Map(), {
+      tagFilter: { tags: ["rag"], match: "all" },
+    }).map((d) => d.id),
+  ).toEqual(["a"]);
+});
+
+it("keeps tags immediately after the title when toggling other default or optional columns", () => {
+  for (const column of ["status", "authors", "published"] as const) {
+    const toggled = toggleColumn(defaultColumns, column);
+    expect(toggled[0]).toBe("tags");
+    expect(toggleColumn(toggled, column)).toEqual(defaultColumns);
+  }
+});
+
+it("restores the tag column to its default position after hiding and showing it", () => {
+  const hidden = toggleColumn(defaultColumns, "tags");
+  expect(hidden).toEqual(["authors", "year", "venue", "status"]);
+  expect(toggleColumn(hidden, "tags")).toEqual(defaultColumns);
 });

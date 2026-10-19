@@ -44,7 +44,7 @@ export function dragHorizontally(
 export function resizeBoundary(
   widths: Partial<Record<"title" | PaperColumn, number>>,
   left: "title" | PaperColumn,
-  right: PaperColumn,
+  right: "title" | PaperColumn,
   dx: number,
 ): Partial<Record<PaperColumn, number>> {
   const l = widths[left] ?? 0,
@@ -54,7 +54,9 @@ export function resizeBoundary(
   );
   return left === "title"
     ? { [right]: r - moved }
-    : { [left]: l + moved, [right]: r - moved };
+    : right === "title"
+      ? { [left]: l + moved }
+      : { [left]: l + moved, [right]: r - moved };
 }
 
 export const clampDetailWidth = (width: number) =>

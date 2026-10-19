@@ -43,9 +43,14 @@ export interface TextSpan {
   bounds: Box;
 }
 export const isAsset = (label: string) =>
-  ["chart", "image", "table", "display_formula", "inline_formula"].includes(
-    label,
-  );
+  [
+    "algorithm",
+    "chart",
+    "image",
+    "table",
+    "display_formula",
+    "inline_formula",
+  ].includes(label);
 export function intersection(a: Box, b: Box) {
   return (
     Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) *

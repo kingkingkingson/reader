@@ -169,3 +169,37 @@ it("leaves the API image model empty when no model passed vision", async () => {
   expect(trigger("图片模型").disabled).toBe(true);
   expect(host.textContent).toContain("没有通过图片理解检测的模型");
 });
+
+it("disables effort for fixed models and shows the actual mapping for tunable models", async () => {
+  config.primary = "api";
+  config.models = { api: "fixed" };
+  config.translationModels = { api: "tunable" };
+  useReaderStore.setState({ aiConfig: config });
+  vi.mocked(api.agentModels).mockResolvedValue([
+    {
+      id: "fixed",
+      name: "Fixed",
+      description: "",
+      isDefault: true,
+      capability: { text: true, vision: false, checkedAt: "now" },
+      effortInfo: { mode: "fixed", note: "固定模式" },
+    },
+    {
+      id: "tunable",
+      name: "Tunable",
+      description: "",
+      isDefault: false,
+      capability: { text: true, vision: false, checkedAt: "now" },
+      effortInfo: {
+        mode: "levels",
+        note: "官方映射",
+        mappings: { medium: "high" },
+      },
+    },
+  ]);
+  await act(async () => root.render(<TaskModels disabled={false} />));
+  expect(trigger("问答 Effort").disabled).toBe(true);
+  expect(trigger("问答 Effort").textContent).toContain("固定／自动");
+  expect(trigger("翻译 Effort").disabled).toBe(false);
+  expect(host.textContent).toContain("medium → high");
+});

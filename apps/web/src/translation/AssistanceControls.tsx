@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, RotateCcw, Sparkles } from "lucide-react";
+import { Check, Pause, RotateCcw, Languages } from "lucide-react";
 import type { EPUBLocation, LibraryMode, Processing } from "@reader/core";
 import { api } from "@reader/api";
 import {
@@ -50,6 +50,7 @@ export function AssistanceControls({
     let alive = true;
     setSaved(undefined);
     setBusy(false);
+    setConfirmAll(false);
     void api
       .assistance(documentId)
       .then((p) => {
@@ -71,13 +72,18 @@ export function AssistanceControls({
           ? epubChapter &&
             (!job?.startedAt || job.translating?.status === "complete")
             ? ["chapter", "翻译本章"]
-            : job?.startedAt
+            : job?.startedAt && !job.manualTranslation
               ? ["resume", "继续翻译"]
-              : ["start", "开始翻译"]
+              : ["start", "翻译"]
           : library === "books"
             ? ["chapter", "翻译本章"]
             : ["start", "翻译完成"];
   const finished = complete && action !== "chapter";
+  const actionLabel = job?.retranslating
+    ? action === "pause"
+      ? "暂停重译"
+      : "继续重译"
+    : label;
   const run = async () => {
     if (action !== "chapter") return api.setAssistance(documentId, action);
     if (epubChapter) {
@@ -130,14 +136,16 @@ export function AssistanceControls({
           }
         }}
       >
-        {action === "pause" ? (
+        {finished ? (
+          <Check />
+        ) : action === "pause" ? (
           <Pause />
         ) : action === "resume" && job?.status === "failed" ? (
           <RotateCcw />
         ) : (
-          <Sparkles />
+          <Languages />
         )}
-        {label}
+        {actionLabel}
       </Button>
       <Button
         variant="ghost"
@@ -190,7 +198,6 @@ export function AssistanceControls({
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
-    </div>
+      </AlertDialog>    </div>
   );
 }

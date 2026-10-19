@@ -6,6 +6,7 @@ bin/
 .DS_Store
 coverage/
 .env
+AGENTS.local.md
 apps/web/public/pdf-assets/
 
 apps/desktop/staging/

@@ -33,15 +33,6 @@ function MessageMarkdown({
   );
 }
 
-/** A paragraph that fails to render shows a notice instead of taking down the reader. */
-// Algorithms render as a code block; the fence outgrows any backtick run inside.
-const algorithmMarkdown = (text: string) => {
-  const fence = "`".repeat(
-    Math.max(3, ...Array.from(text.matchAll(/`+/g), (m) => m[0].length + 1)),
-  );
-  return `${fence}algorithm\n${text}\n${fence}`;
-};
-
 /**
  * Layout crops are rasterized with the whole page, so figures look soft once
  * shown at full width. After the lazy crop loads, a vector render at the
@@ -136,11 +127,12 @@ function TranslationContent({
   const idle = translation?.status === "idle";
   const halted = paused && translation?.status === "pending";
   const asset =
-    !!block.image || ["table", "chart", "image"].includes(block.label);
+    !!block.image ||
+    ["algorithm", "table", "chart", "image"].includes(block.label);
   const image = block.image ? (
     <BlockImage
-      key={block.id}
-      src={imageURL ?? blockImageURL(documentId, block.id)}
+      key={`${block.id}:${block.image}`}
+      src={imageURL ?? blockImageURL(documentId, block.id, block.image)}
       alt={block.caption || block.text || block.label}
       render={
         imageURL || !renderImage
@@ -215,7 +207,6 @@ function TranslationContent({
     [
       "reference",
       "reference_content",
-      "algorithm",
       "display_formula",
       "inline_formula",
       "formula_number",
@@ -228,18 +219,13 @@ function TranslationContent({
     <>
       {image}
       {preserve ? (
-        !asset &&
-        (block.label === "algorithm" ? (
-          <div className="translation-algorithm">
-            <MessageMarkdown content={algorithmMarkdown(block.text)} />
-          </div>
-        ) : (
+        !asset && (
           <MessageMarkdown
             content={block.text}
             blockId={block.id}
             onCitation={onCitation}
           />
-        ))
+        )
       ) : translation?.status === "complete" ? (
         <>
           {retranslateButton}

@@ -6,6 +6,12 @@
     "terminal": "done"
   },
   {
+    "name": "document-activity",
+    "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: activity\ndata: {\"message\":\"正在建立全文检索索引\",\"phase\":\"indexing\"}\n\nevent: activity\ndata: {\"message\":\"正在检索 cobalt · 查找相关原文\",\"phase\":\"reading\",\"tool\":\"search_document\"}\n\nevent: activity\ndata: {\"message\":\"正在根据已读原文生成回答\",\"phase\":\"writing\"}\n\nevent: delta\ndata: {\"text\":\"原文答案 [S1]\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "text": "原文答案 [S1]",
+    "terminal": "done"
+  },
+  {
     "name": "fallback",
     "wire": "event: status\ndata: {\"status\":\"reading-image\"}\n\nevent: fallback\ndata: {\"message\":\"codex 调用失败，已切换到 image-api\"}\n\nevent: delta\ndata: {\"text\":\"图片解释\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
     "text": "图片解释",
@@ -22,5 +28,17 @@
     "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: delta\ndata: {\"text\":\"部分正文\"}\n\n",
     "text": "部分正文",
     "terminal": null
+  },
+  {
+    "name": "document-draft",
+    "wire": "event: status\ndata: {\"status\":\"reading\"}\n\nevent: draft\ndata: {\"reset\":false,\"text\":\"正在查找\"}\n\nevent: draft\ndata: {\"reset\":true,\"text\":\"\"}\n\nevent: draft\ndata: {\"reset\":false,\"text\":\"答案\"}\n\nevent: delta\ndata: {\"text\":\"答案\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "text": "答案",
+    "terminal": "done"
+  },
+  {
+    "name": "reasoning-before-answer",
+    "wire": "event: reasoning\ndata: {\"text\":\"先查看原文。\"}\n\nevent: activity\ndata: {\"message\":\"正在查看第 2 页图像\",\"phase\":\"reading\",\"tool\":\"read_pdf_pages\"}\n\nevent: reasoning\ndata: {\"text\":\"\\n\\n再核对图例。\"}\n\nevent: delta\ndata: {\"text\":\"最终答案\"}\n\nevent: done\ndata: {\"ok\":true}\n\n",
+    "text": "最终答案",
+    "terminal": "done"
   }
 ]

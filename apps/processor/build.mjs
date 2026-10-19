@@ -29,13 +29,23 @@ try {
   await rm(temporary, { recursive: true, force: true });
 }
 
+await rm(join(root, "dist"), { recursive: true, force: true });
 await build({
   absWorkingDir: root,
-  entryPoints: ["src/main.ts", "src/repair-text.ts", "src/model.ts"],
+  entryPoints: [
+    "src/main.ts",
+    "src/repair-text.ts",
+    "src/model.ts",
+    "src/corpus.ts",
+    "src/render-pages.ts",
+    "src/endnote-pdf-cli.ts",
+  ],
   bundle: true,
   platform: "node",
   format: "esm",
   packages: "external",
+  // Keep the worker lazy so native module errors reach main.ts diagnostics.
+  splitting: true,
   outdir: join(root, "dist"),
   outExtension: { ".js": ".mjs" },
 });

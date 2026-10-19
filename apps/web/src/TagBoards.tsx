@@ -397,8 +397,14 @@ export function TagBoards({
             保存为看板
           </Button>
           {(tags.length > 0 || active) && (
-            <Button variant="ghost" size="sm" onClick={reset}>
-              清除筛选
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="清除筛选"
+              title="清除筛选"
+              onClick={reset}
+            >
+              <Trash2 />
             </Button>
           )}
           <span className="text-xs text-muted-foreground" role="status">

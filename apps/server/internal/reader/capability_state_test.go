@@ -50,7 +50,7 @@ func TestRuntimeFailurePersistsCapability(t *testing.T) {
 			if mode == "fallback" {
 				g.connections["text-api"] = generationConnection{VerifiedText: true, Adapter: adapterFunc(func(_ context.Context, _ GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
 					_ = emit(ProviderEvent{Text: "backup"})
-					return GenerateResult{"backup", "stop"}, nil
+					return GenerateResult{Text: "backup", FinishReason: "stop"}, nil
 				})}
 			}
 			input := AIInput{Prompt: "test"}

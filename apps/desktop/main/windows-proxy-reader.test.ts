@@ -68,7 +68,6 @@ it.each([
   "not JSON",
   '{"autoDetect":true}',
   '{"autoConfigUrl":"https://example.org/proxy.pac"}',
-  '{"proxy":"localhost:7890","bypass":"foo*bar"}',
 ])(
   "falls back without throwing for unusable Windows output: %s",
   async (stdout) => {
@@ -78,3 +77,15 @@ it.each([
     expect(await childProxyEnvironment(parent, "win32")).toEqual(parent);
   },
 );
+
+it("tolerates unsupported bypass rules and applies the proxy", async () => {
+  execute.mockResolvedValue({
+    stdout: '{"proxy":"localhost:7890","bypass":"foo*bar"}',
+    stderr: "",
+  });
+  const parent = { HTTPS_PROXY: "http://inherited:7890" };
+  const result = await childProxyEnvironment(parent, "win32");
+  expect(result.HTTP_PROXY).toBe("http://localhost:7890");
+  expect(result.HTTPS_PROXY).toBe("http://localhost:7890");
+  expect(result.NO_PROXY).toBe("localhost,127.0.0.1,::1");
+});

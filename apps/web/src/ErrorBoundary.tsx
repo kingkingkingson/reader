@@ -1,4 +1,7 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ReactNode, type ErrorInfo } from "react";
+import { diagnosticError } from "../../../packages/reader-core/src/diagnostics";
+import { reportDiagnostic } from "./diagnostics";
+import { DiagnosticExport } from "./DiagnosticExport";
 import { Button } from "@reader/ui/components/button";
 
 type Props = { fallback: ReactNode; resetKey?: unknown; children?: ReactNode };
@@ -14,6 +17,18 @@ export class ErrorBoundary extends Component<Props, State> {
     return Object.is(props.resetKey, state.resetKey)
       ? null
       : { failed: false, resetKey: props.resetKey };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    reportDiagnostic({
+      level: "error",
+      event: "react.render_failed",
+      ...diagnosticError(error),
+      stack: (
+        (diagnosticError(error).stack || "") +
+        "\n" +
+        (info.componentStack || "")
+      ).slice(0, 8000),
+    });
   }
   render() {
     return this.state.failed ? this.props.fallback : this.props.children;
@@ -36,6 +51,7 @@ export function AppCrash() {
       >
         重新加载
       </Button>
+      <DiagnosticExport />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import {
   ArrowRightLeft,
   BookOpen,
   ExternalLink,
+  FileDown,
   FolderOpen,
   FolderPlus,
   Link2,
@@ -44,6 +45,7 @@ import {
   toggleTagFor,
 } from "./actions";
 import { paperLink } from "./format";
+import { exportAnnotatedPDFWithToast } from "../annotated-pdf-export";
 import { CitationMenuItems } from "./CitationMenu";
 import {
   categoryTree,
@@ -241,6 +243,12 @@ export function PaperMenuItems({
               {window.readerDesktop.platform === "darwin"
                 ? "在访达中显示"
                 : "在文件夹中显示"}
+            </K.Item>
+          )}
+          {one.type === "pdf" && (
+            <K.Item onClick={() => void exportAnnotatedPDFWithToast(one)}>
+              <FileDown />
+              导出带批注的 PDF
             </K.Item>
           )}
           <K.Item onClick={() => actions.move(one)}>

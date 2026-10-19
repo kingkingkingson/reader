@@ -1,3 +1,8 @@
+import { selectionContext } from "./selection-context";
+import {
+  annotationsInRects,
+  sentenceRectsAtPoint,
+} from "../translation/annotation-hover";
 import { api } from "@reader/api";
 import type {
   Annotation,
@@ -142,6 +147,13 @@ export class EPUBReaderAdapter implements ReaderAdapter {
       { signal },
     );
     container.addEventListener("click", this.click, { signal });
+    container.addEventListener("pointermove", this.hoverAnnotation, { signal });
+    for (const name of ["pointerleave", "pointerdown", "scroll"])
+      container.addEventListener(
+        name,
+        () => this.events.annotationHover?.(null),
+        { signal },
+      );
     document.addEventListener(
       "pointerdown",
       (event) => {
@@ -743,6 +755,7 @@ export class EPUBReaderAdapter implements ReaderAdapter {
       ...(last.id !== first.id ? { endBlockId: last.id } : {}),
     };
     this.selection = {
+      context: selectionContext(range, this.container),
       text: selected.toString(),
       location,
       anchor: selectionAnchor(selected, pointer),
@@ -760,6 +773,42 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     }
     this.selection = null;
     this.events.selection(null);
+  };
+  private hoverAnnotation = (event: PointerEvent) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+      !target ||
+      event.buttons ||
+      window.getSelection()?.toString().trim() ||
+      target.closest("a,button,input,textarea")
+    ) {
+      this.events.annotationHover?.(null);
+      return;
+    }
+    const rects = sentenceRectsAtPoint(target, event.clientX, event.clientY);
+    const byId = new Map(this.annotations.map((a) => [a.id, a]));
+    const ranges = this.marks.flatMap((mark) => {
+      const annotation = byId.get(mark.id);
+      return annotation ? [{ annotation, range: mark.range }] : [];
+    });
+    const matches = annotationsInRects(
+      this.container,
+      this.annotations,
+      ranges,
+      rects,
+    );
+    this.events.annotationHover?.(
+      matches.length
+        ? {
+            ids: matches.map((a) => a.id),
+            anchor: {
+              x: event.clientX,
+              top: Math.min(...rects.map((r) => r.top)),
+              bottom: Math.max(...rects.map((r) => r.bottom)),
+            },
+          }
+        : null,
+    );
   };
   private click = (event: MouseEvent) => {
     const link =
@@ -835,18 +884,13 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     for (const annotation of this.annotations) {
       if (annotation.location.type !== "epub" || annotation.kind === "bookmark")
         continue;
-      const translated =
-        annotation.location.translation?.ranges?.flatMap((r) =>
-          r.location ? [r.location] : [],
-        ) ?? [];
-      const locations = translated.length
-        ? translated
-        : [
-            {
-              ...annotation.location,
-              quote: annotation.location.quote || annotation.quote,
-            },
-          ];
+      if (annotation.location.translation) continue;
+      const locations = [
+        {
+          ...annotation.location,
+          quote: annotation.location.quote || annotation.quote,
+        },
+      ];
       const ranges: Range[] = [];
       for (const location of locations) {
         const slices = resolveEPUBLocation(location, this.blocks);
@@ -924,6 +968,7 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     );
   }
   async destroy() {
+    this.events.annotationHover?.(null);
     this.disposed = true;
     this.navigation++;
     this.abort.abort();

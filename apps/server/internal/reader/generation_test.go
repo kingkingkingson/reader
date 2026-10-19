@@ -34,7 +34,7 @@ func TestGenerationAttemptBoundaries(t *testing.T) {
 			a := adapterFunc(func(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
 				late = emit
 				_ = emit(ProviderEvent{Text: "a"})
-				return GenerateResult{tc.returned, tc.reason}, nil
+				return GenerateResult{Text: tc.returned, FinishReason: tc.reason}, nil
 			})
 			_, err := runAttempt(t.Context(), a, AIInput{}, func(e ProviderEvent) error { text += e.Text; return nil })
 			if (err != nil) != tc.wantError {
@@ -54,7 +54,7 @@ func TestGenerationAttemptBoundaries(t *testing.T) {
 			if ctx.Err() == nil {
 				t.Error("not canceled")
 			}
-			return GenerateResult{"alate", "stop"}, nil
+			return GenerateResult{Text: "alate", FinishReason: "stop"}, nil
 		})
 		_, err := runAttempt(t.Context(), a, AIInput{}, func(e ProviderEvent) error { calls++; return failure })
 		if !errors.Is(err, failure) || calls != 1 {
@@ -63,7 +63,7 @@ func TestGenerationAttemptBoundaries(t *testing.T) {
 	})
 }
 func TestGenerationFallbackPolicy(t *testing.T) {
-	for _, mode := range []string{"before", "after", "background", "cancel", "timeout", "emit-failure"} {
+	for _, mode := range []string{"before", "after", "draft", "reasoning", "background", "cancel", "timeout", "emit-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -75,7 +75,11 @@ func TestGenerationFallbackPolicy(t *testing.T) {
 			backups := 0
 			var visible string
 			primary := adapterFunc(func(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
-				if mode != "before" {
+				if mode == "draft" {
+					_ = emit(ProviderEvent{Draft: "partial"})
+				} else if mode == "reasoning" {
+					_ = emit(ProviderEvent{Reasoning: "thinking"})
+				} else if mode != "before" {
 					_ = emit(ProviderEvent{Text: "partial"})
 				}
 				if mode == "cancel" {
@@ -88,7 +92,7 @@ func TestGenerationFallbackPolicy(t *testing.T) {
 				if err := emit(ProviderEvent{Text: "backup"}); err != nil {
 					return GenerateResult{}, err
 				}
-				return GenerateResult{"backup", "stop"}, nil
+				return GenerateResult{Text: "backup", FinishReason: "stop"}, nil
 			})
 			g := &GenerationService{primary: "codex", connections: map[string]generationConnection{"codex": {Adapter: primary, VerifiedText: true}, "text-api": {Adapter: backup, VerifiedText: true}}}
 			result, err := g.generate(ctx, AIInput{}, false, mode != "background", func(e ProviderEvent) error {

@@ -15,7 +15,9 @@ const themes = ["light", "sepia", "dark"] as const;
 export default function GuidePreview() {
   const [theme, setTheme] = useState<(typeof themes)[number]>("light");
   const [view, setView] = useState<"onboarding" | "guide" | "release" | null>(
-    "onboarding",
+    new URLSearchParams(location.search).get("view") === "release"
+      ? "release"
+      : "onboarding",
   );
   const [topic, setTopic] = useState(guideTopics[0].id);
   const [run, setRun] = useState(0);

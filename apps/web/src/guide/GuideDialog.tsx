@@ -1,5 +1,13 @@
+import { ShortcutPanel } from "../shortcuts/ShortcutPanel";
 import { useState, type KeyboardEvent } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { toast } from "sonner";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Star,
+  MessageSquare,
+  Keyboard,
+} from "lucide-react";
 import { Button } from "@reader/ui/components/button";
 import {
   Dialog,
@@ -86,10 +94,13 @@ export function OnboardingDialog({
   const back = () => setIndex((i) => Math.max(0, i - 1));
   const next = () => (last ? onFinish() : setIndex(index + 1));
   return (
-    <Dialog open={open} onOpenChange={(value) => !value && onFinish()}>
+    <Dialog
+      open={open}
+      disablePointerDismissal
+      onOpenChange={(_, details) => details.cancel()}
+    >
       <DialogContent
         className="guide-dialog sm:max-w-2xl"
-        // The footer offers Skip; a corner close would read as dismissing.
         showCloseButton={false}
         onKeyDown={arrowKeys(back, () => !last && next())}
       >
@@ -99,11 +110,6 @@ export function OnboardingDialog({
           <span className="sr-only" aria-live="polite">
             第 {index + 1} 步，共 {pages.length} 步
           </span>
-          {!last && (
-            <Button variant="ghost" onClick={onFinish}>
-              跳过
-            </Button>
-          )}
           {index > 0 && (
             <Button variant="outline" onClick={back}>
               上一步
@@ -191,13 +197,18 @@ export function GuideDialog({
         <DialogTitle className="sr-only">指南</DialogTitle>
         <Tabs
           orientation="vertical"
-          value={guideTopics[index].id}
+          value={topic === "shortcuts" ? "shortcuts" : guideTopics[index].id}
           onValueChange={(value) => onTopicChange(String(value))}
           className="guide-layout"
         >
           <div className="guide-nav">
             <h2 className="mb-3 px-2 text-sm font-medium">指南</h2>
             <TabsList variant="line" aria-label="指南主题" className="w-full">
+              <TabsTrigger value="shortcuts" className="h-9 px-2">
+                <Keyboard />
+                快捷键
+              </TabsTrigger>
+              <div className="my-2 w-full border-t" role="separator" />
               {guideTopics.map((t) => (
                 <TabsTrigger key={t.id} value={t.id} className="h-9 px-2">
                   <t.icon />
@@ -206,6 +217,9 @@ export function GuideDialog({
               ))}
             </TabsList>
           </div>
+          <TabsContent value="shortcuts" className="min-w-0">
+            <ShortcutPanel />
+          </TabsContent>
           {guideTopics.map((t, i) => (
             <TabsContent key={t.id} value={t.id} className="min-w-0">
               <TopicPanel
@@ -242,37 +256,79 @@ export function ReleaseNotesDialog({
   onClose: () => void;
   onShowTopic: (topic: string) => void;
 }) {
+  const [opening, setOpening] = useState(false);
+  const visitGitHub = async (issues: boolean) => {
+    const url = `https://github.com/cynicalight/reader${issues ? "/issues/new/choose" : ""}`;
+    setOpening(true);
+    try {
+      if (window.readerDesktop?.openExternal) {
+        await window.readerDesktop.openExternal(url);
+      } else {
+        const opened = window.open(url, "_blank");
+        if (!opened) throw new Error("无法打开浏览器，请允许弹出窗口后重试。");
+        opened.opener = null;
+      }
+      onClose();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "无法打开链接，请重试。",
+      );
+    } finally {
+      setOpening(false);
+    }
+  };
   return (
     <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
-      <DialogContent className="guide-dialog sm:max-w-md">
+      <DialogContent
+        showCloseButton={false}
+        className="guide-dialog sm:max-w-md"
+      >
         <DialogHeader>
           <DialogTitle>Reader {version} 更新内容</DialogTitle>
-          <DialogDescription className="sr-only">
-            本次更新的主要变化
+          <DialogDescription>
+            {items.length ? "本次更新的主要变化" : "已更新到新版本。"}
           </DialogDescription>
         </DialogHeader>
-        <ul className="space-y-4">
-          {items.map((item) => (
-            <li key={item.title} className="space-y-1">
-              <p className="font-medium">{item.title}</p>
-              {item.body && (
-                <p className="leading-6 text-muted-foreground">{item.body}</p>
-              )}
-              {item.topic && guideTopics.some((t) => t.id === item.topic) && (
-                <Button
-                  variant="link"
-                  className="h-auto p-0"
-                  onClick={() => onShowTopic(item.topic!)}
-                >
-                  查看演示
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-        <DialogFooter>
-          <Button autoFocus onClick={onClose}>
-            知道了
+        {items.length > 0 && (
+          <ul className="space-y-4">
+            {items.map((item) => (
+              <li key={item.title} className="space-y-1">
+                <p className="font-medium">{item.title}</p>
+                {item.body && (
+                  <p className="leading-6 text-muted-foreground">{item.body}</p>
+                )}
+                {item.topic && guideTopics.some((t) => t.id === item.topic) && (
+                  <Button
+                    variant="link"
+                    className="h-auto p-0"
+                    onClick={() => onShowTopic(item.topic!)}
+                  >
+                    查看演示
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="text-sm leading-6 text-muted-foreground">
+          如果 Reader 对你有帮助，欢迎在 GitHub 点个
+          Star。遇到问题或有建议，也欢迎提交 Issue。
+        </p>
+        <DialogFooter className="flex-col sm:flex-col">
+          <Button
+            autoFocus
+            disabled={opening}
+            onClick={() => void visitGitHub(false)}
+          >
+            <Star />去 GitHub 点 Star
+          </Button>
+          <Button
+            variant="outline"
+            disabled={opening}
+            onClick={() => void visitGitHub(true)}
+          >
+            <MessageSquare />
+            已点 Star，去提 Issue
           </Button>
         </DialogFooter>
       </DialogContent>

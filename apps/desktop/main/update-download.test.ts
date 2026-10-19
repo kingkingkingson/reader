@@ -15,12 +15,21 @@ it("downloads to a private directory only after SHA256 verification", async () =
   const bytes = new Uint8Array(1024 * 1024 + 1).fill(42);
   const hash = createHash("sha256").update(bytes).digest("hex");
   try {
-    const path = await downloadUpdate(update, directory, async (url) =>
-      url === update.checksumURL
-        ? new Response(`${hash}  ${update.installer}\n`)
-        : new Response(bytes),
+    const progress: Array<[number, number | undefined]> = [];
+    const path = await downloadUpdate(
+      update,
+      directory,
+      async (url) =>
+        url === update.checksumURL
+          ? new Response(`${hash}  ${update.installer}\n`)
+          : new Response(bytes, {
+              headers: { "content-length": String(bytes.length) },
+            }),
+      (received, total) => progress.push([received, total]),
     );
     expect(await readFile(path)).toEqual(Buffer.from(bytes));
+    expect(progress[0]).toEqual([0, bytes.length]);
+    expect(progress.at(-1)).toEqual([bytes.length, bytes.length]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

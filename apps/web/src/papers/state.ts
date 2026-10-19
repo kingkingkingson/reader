@@ -1,11 +1,13 @@
 import { create } from "zustand";
-import type { SmartCategory } from "@reader/core";
+import type { SmartCategory, TagBoard } from "@reader/core";
 import type { PaperView } from "./model";
 
 /** Session state shared by the paper sidebar, list and detail panel. */
 export const usePaperUI = create<{
   view: PaperView;
   query: string;
+  tagFilter: Pick<TagBoard, "tags" | "match">;
+  setTagFilter: (filter: Pick<TagBoard, "tags" | "match">) => void;
   selectedId: string | null;
   picking: boolean;
   picked: Set<string>;
@@ -32,6 +34,8 @@ export const usePaperUI = create<{
 }>((set) => ({
   view: "all",
   query: "",
+  tagFilter: { tags: [], match: "all" },
+  setTagFilter: (tagFilter) => set({ tagFilter, selectedId: null }),
   selectedId: null,
   picking: false,
   picked: new Set(),

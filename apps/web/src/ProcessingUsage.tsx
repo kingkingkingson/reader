@@ -17,6 +17,7 @@ import {
 
 const labels: Record<string, string> = {
   chat: "聊天",
+  overview: "概要生成",
   settling: "沉淀／图片解析",
   translating: "正文翻译",
 };
@@ -141,7 +142,7 @@ export function UsageDetails({ report }: { report: ProcessingUsage }) {
             </tr>
           </thead>
           <tbody>
-            {["settling", "translating", "chat"]
+            {["settling", "translating", "overview", "chat"]
               // Image consolidation was removed; keep its row only for past usage.
               .filter(
                 (stage) =>

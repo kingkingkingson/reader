@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { installerChecksum, type ReleaseUpdate } from "./updates";
 
 type Request = (url: string, init: RequestInit) => Promise<Response>;
+/** Total is undefined when the server omits Content-Length. */
+export type DownloadProgress = (received: number, total?: number) => void;
 async function readBody(
   response: Response,
   max: number,
@@ -31,6 +33,7 @@ export async function downloadUpdate(
   update: ReleaseUpdate,
   directory: string,
   request: Request,
+  onProgress?: DownloadProgress,
 ): Promise<string> {
   // Only selectRelease can supply these URLs; they are never renderer-controlled.
   const options: RequestInit = {
@@ -58,14 +61,16 @@ export async function downloadUpdate(
     const digest = createHash("sha256");
     let size: number;
     try {
-      size = await readBody(
-        await request(update.downloadURL, options),
-        1024 * 1024 * 1024,
-        async (chunk) => {
-          digest.update(chunk);
-          await file.writeFile(chunk);
-        },
-      );
+      const response = await request(update.downloadURL, options);
+      const total = Number(response.headers.get("content-length")) || undefined;
+      let received = 0;
+      onProgress?.(0, total);
+      size = await readBody(response, 1024 * 1024 * 1024, async (chunk) => {
+        digest.update(chunk);
+        await file.writeFile(chunk);
+        received += chunk.byteLength;
+        onProgress?.(received, total);
+      });
       await file.sync();
     } finally {
       await file.close();

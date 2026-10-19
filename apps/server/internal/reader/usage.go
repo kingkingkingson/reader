@@ -1,6 +1,7 @@
 package reader
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -431,4 +432,53 @@ func codexTokens(raw json.RawMessage) *TokenCounts {
 		return nil
 	}
 	return &result
+}
+
+// One lifecycle for a model call, whether a normal generation or an Agent round.
+func trackModelUsage(call UsageCall, sink func(UsageCall) error, emit func(ProviderEvent) error, run func(func(ProviderEvent) error) (GenerateResult, error)) (GenerateResult, error) {
+	if call.ID == "" {
+		call.ID = id()
+	}
+	call.StartedAt = now()
+	call.Status = "running"
+	call.Models = []ModelTokens{{Model: ""}}
+	save := func() error {
+		if sink != nil {
+			return sink(call)
+		}
+		return nil
+	}
+	if err := save(); err != nil {
+		return GenerateResult{}, generationError(ErrorSave, "无法保存调用统计")
+	}
+	var mu sync.Mutex
+	result, err := run(func(event ProviderEvent) error {
+		if len(event.Metrics) > 0 {
+			mu.Lock()
+			call.Models = mergeModelTokens(call.Models, event.Metrics)
+			saveErr := save()
+			mu.Unlock()
+			if saveErr != nil {
+				return generationError(ErrorSave, "无法保存调用统计")
+			}
+		}
+		if emit != nil {
+			return emit(event)
+		}
+		return nil
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	call.FinishedAt = now()
+	call.Status = "complete"
+	if err != nil {
+		call.Status = "failed"
+		if errors.Is(err, context.Canceled) {
+			call.Status = "cancelled"
+		}
+	}
+	if saveErr := save(); saveErr != nil {
+		return GenerateResult{}, generationError(ErrorSave, "无法保存调用统计")
+	}
+	return result, err
 }

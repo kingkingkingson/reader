@@ -91,7 +91,7 @@ func TestZoteroMigrationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Title != "迁移论文" || doc.Metadata.DOI != "10.1000/example" || doc.Metadata.Sources["doi"] != "manual" || doc.CreatedAt != "2024-01-02T03:04:05Z" || doc.Author != "Ada Lovelace, 研究小组" || len(doc.Tags) != 1 || len(doc.Folders) != 1 {
+	if doc.LastOpenedAt != "" || doc.Title != "迁移论文" || doc.Metadata.DOI != "10.1000/example" || doc.Metadata.Sources["doi"] != "manual" || doc.CreatedAt != "2024-01-02T03:04:05Z" || doc.Author != "Ada Lovelace, 研究小组" || len(doc.Tags) != 1 || len(doc.Folders) != 1 {
 		t.Fatalf("document: %+v", doc)
 	}
 	imported, err := os.ReadFile(s.Store.File(doc))
@@ -129,8 +129,8 @@ func TestZoteroMigrationRoundTrip(t *testing.T) {
 	}
 	var p Processing
 	json.Unmarshal([]byte(processingBody), &p)
-	if p.Enabled {
-		t.Fatal("migration queued AI processing")
+	if !p.Enabled || p.AutoTranslateMaxPages == nil || *p.AutoTranslateMaxPages != 50 {
+		t.Fatal("migration must use the default translation threshold")
 	}
 	// Curated Reader data, including removed imported annotations, survives a retry.
 	if _, err = s.Store.DB.Exec(`UPDATE document_notes SET body='Reader 编辑' WHERE document_id=?; DELETE FROM annotations WHERE document_id=?`, doc.ID, doc.ID); err != nil {

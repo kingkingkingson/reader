@@ -63,12 +63,19 @@ func (s *Store) migrateOrganization() error {
 	}
 	// Existing papers open in the paper library; everything else stays with books.
 	if !columns["library"] {
-		if _, err = tx.Exec("UPDATE documents SET library='papers' WHERE type='pdf' AND category='paper' AND size<=?", maxPaperBytes); err != nil {
+		if _, err = tx.Exec("UPDATE documents SET library='papers' WHERE type='pdf' AND category='paper' AND size<=?", 50<<20); err != nil {
 			return err
 		}
 	}
 	if !columns["reading_status"] {
 		if _, err = tx.Exec("UPDATE documents SET reading_status=CASE WHEN percentage>=0.98 THEN 'done' WHEN percentage>0 THEN 'reading' ELSE 'unread' END"); err != nil {
+			return err
+		}
+	}
+	// Older Zotero imports bound JSON as []byte, which SQLite stores as BLOB.
+	// Preserve the JSON bytes but use TEXT so conditional writes compare equally.
+	for _, column := range []string{"metadata", "tags", "folders"} {
+		if _, err = tx.Exec("UPDATE documents SET " + column + "=CAST(" + column + " AS TEXT) WHERE typeof(" + column + ")='blob'"); err != nil {
 			return err
 		}
 	}

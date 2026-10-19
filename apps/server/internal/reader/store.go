@@ -54,14 +54,16 @@ type Annotation struct {
 	Tags []string `json:"tags,omitempty"`
 }
 type Message struct {
-	Attachments []ImageAttachment `json:"attachments,omitempty"`
-	Context     string            `json:"context,omitempty"`
-	References  json.RawMessage   `json:"references,omitempty"`
-	ID          string            `json:"id"`
-	DocumentID  string            `json:"documentId"`
-	Role        string            `json:"role"`
-	Content     string            `json:"content"`
-	CreatedAt   string            `json:"createdAt"`
+	Reasoning       string            `json:"reasoning,omitempty"`
+	ReadingLocation json.RawMessage   `json:"readingLocation,omitempty"`
+	Attachments     []ImageAttachment `json:"attachments,omitempty"`
+	Context         string            `json:"context,omitempty"`
+	References      json.RawMessage   `json:"references,omitempty"`
+	ID              string            `json:"id"`
+	DocumentID      string            `json:"documentId"`
+	Role            string            `json:"role"`
+	Content         string            `json:"content"`
+	CreatedAt       string            `json:"createdAt"`
 }
 type Store struct {
 	processingWriteMu sync.Mutex
@@ -82,23 +84,37 @@ func OpenStore(root string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY,type TEXT NOT NULL,title TEXT NOT NULL,author TEXT NOT NULL,size INTEGER NOT NULL,created_at TEXT NOT NULL,last_opened_at TEXT NOT NULL,favorite INTEGER NOT NULL DEFAULT 0,progress TEXT,percentage REAL NOT NULL DEFAULT 0);
+ CREATE TABLE IF NOT EXISTS endnote_imports(source_id TEXT NOT NULL,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,source_hash TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(source_id,document_id));
  CREATE TABLE IF NOT EXISTS zotero_imports(source_id TEXT NOT NULL,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(source_id,document_id));
  CREATE TABLE IF NOT EXISTS zotero_note_imports(source_id TEXT NOT NULL,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,PRIMARY KEY(source_id,document_id));
  CREATE TABLE IF NOT EXISTS annotations(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS document_processing(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,phase TEXT NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS translations(document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,block_id TEXT NOT NULL,source_hash TEXT NOT NULL,status TEXT NOT NULL,body TEXT NOT NULL,priority INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(document_id,block_id,source_hash));
+ CREATE TABLE IF NOT EXISTS translation_previous(document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,block_id TEXT NOT NULL,source_hash TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(document_id,block_id,source_hash));
+ CREATE TABLE IF NOT EXISTS translation_restarts(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,options TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS processing_usage(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS chat_usage_coverage(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,history_complete INTEGER NOT NULL);
  INSERT OR IGNORE INTO chat_usage_coverage(document_id,history_complete) SELECT id,NOT EXISTS(SELECT 1 FROM messages WHERE document_id=documents.id) FROM documents;
  CREATE TABLE IF NOT EXISTS processing_intervals(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,stage TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT);
  CREATE TABLE IF NOT EXISTS tag_boards(id TEXT PRIMARY KEY,name TEXT NOT NULL,tags TEXT NOT NULL,match TEXT NOT NULL CHECK(match IN ('all','any')));
  CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS journal_rank_cache(name TEXT NOT NULL,key_hash TEXT NOT NULL,body TEXT NOT NULL,checked_at TEXT NOT NULL,PRIMARY KEY(name,key_hash));
  CREATE TABLE IF NOT EXISTS document_notes(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL,updated_at TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS document_relations(a TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,b TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,created_at TEXT NOT NULL,PRIMARY KEY(a,b),CHECK(a<b));
  CREATE TABLE IF NOT EXISTS connector_snapshots(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,source_url TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS document_relations_b ON document_relations(b);
- CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(document_id UNINDEXED,href UNINDEXED,content,tokenize='unicode61');`)
+ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(document_id UNINDEXED,href UNINDEXED,content,tokenize='unicode61');
+ CREATE TABLE IF NOT EXISTS document_corpora(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,fingerprint TEXT NOT NULL,revision TEXT NOT NULL,body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS document_corpus_jobs(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,status TEXT NOT NULL);
+ CREATE VIRTUAL TABLE IF NOT EXISTS document_passages_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,block_id UNINDEXED,content,tokenize='unicode61');
+ CREATE TABLE IF NOT EXISTS document_overview_drafts(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,job_id TEXT NOT NULL,body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS document_overviews(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS document_overview_jobs(document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,job_id TEXT NOT NULL,status TEXT NOT NULL,error TEXT NOT NULL DEFAULT '');
+ CREATE VIRTUAL TABLE IF NOT EXISTS document_overviews_fts USING fts5(document_id UNINDEXED,revision UNINDEXED,content,tokenize='unicode61');
+ CREATE TRIGGER IF NOT EXISTS document_overview_delete AFTER DELETE ON document_overviews BEGIN DELETE FROM document_overviews_fts WHERE document_id=old.document_id; END;
+ CREATE TABLE IF NOT EXISTS document_conversations(document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,provider TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(document_id,provider));
+ CREATE TABLE IF NOT EXISTS chat_agent_runs(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,body TEXT NOT NULL);`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -108,7 +124,7 @@ func OpenStore(root string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err = store.compactUnderlines(); err != nil {
+	if err = store.compactMarks(); err != nil {
 		db.Close()
 		return nil, err
 	}

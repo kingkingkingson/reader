@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,8 +21,12 @@ type ProcessingStage struct {
 	Warning string `json:"warning,omitempty"`
 }
 type Processing struct {
-	Enabled    bool `json:"enabled"`
-	EPUBManual bool `json:"epubManual,omitempty"`
+	AutoTranslateMaxPages *int   `json:"autoTranslateMaxPages,omitempty"`
+	ManualTranslation     bool   `json:"manualTranslation,omitempty"`
+	Enabled               bool   `json:"enabled"`
+	EPUBManual            bool   `json:"epubManual,omitempty"`
+	Retranslating         bool   `json:"retranslating,omitempty"`
+	LayoutRevision        string `json:"layoutRevision,omitempty"`
 	// Chapter is a book chapter waiting for its pages to be parsed.
 	Chapter           *PageRange       `json:"chapter,omitempty"`
 	Translating       *ProcessingStage `json:"translating,omitempty"`
@@ -116,7 +121,8 @@ func (s *Store) enableLegacyProcessing() error {
 func importedProcessing(id, library, value string) Processing {
 	p := initialProcessing(id)
 	var settings struct {
-		AutoTranslatePDF *bool `json:"autoTranslatePDF"`
+		AutoTranslatePDF      *bool `json:"autoTranslatePDF"`
+		AutoTranslateMaxPages *int  `json:"autoTranslateMaxPages"`
 	}
 	if library == "books" {
 		// Book chapters are parsed and translated when the reader asks.
@@ -125,9 +131,16 @@ func importedProcessing(id, library, value string) Processing {
 		aggregateProcessing(&p)
 		return p
 	}
-	if (value == "" || json.Unmarshal([]byte(value), &settings) == nil) && (settings.AutoTranslatePDF == nil || *settings.AutoTranslatePDF) {
-		p.Enabled, p.Status, p.Detail = true, "queued", "等待解析 PDF"
+	limit := 50
+	if value != "" && json.Unmarshal([]byte(value), &settings) != nil {
+		limit = 0
+	} else if settings.AutoTranslateMaxPages != nil {
+		limit = *settings.AutoTranslateMaxPages
+	} else if settings.AutoTranslatePDF != nil && !*settings.AutoTranslatePDF {
+		limit = 0
 	}
+	p.AutoTranslateMaxPages = &limit
+	p.Enabled, p.Status, p.Detail = true, "queued", "等待解析 PDF"
 	return p
 }
 
@@ -149,6 +162,12 @@ func (s *Store) enqueueDocument(d Document) error {
 	p := initialDocumentProcessing(d, value)
 	b, _ := json.Marshal(p)
 	_, e := s.DB.Exec("INSERT OR IGNORE INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b)
+	if e == nil {
+		e = s.queueDocumentCorpus(d.ID)
+		if e == nil {
+			e = queueImportedOverview(s.DB, d.ID, value)
+		}
+	}
 	return e
 }
 func (s *Server) processingList(w http.ResponseWriter, r *http.Request) {
@@ -238,8 +257,11 @@ func (s *Server) analysisDir(id string) string {
 	return filepath.Join(s.Store.Root, "cache", id, "analysis")
 }
 func (s *Server) readLayout(id string) (layoutManifest, error) {
+	return readValidatedLayout(filepath.Join(s.analysisDir(id), "manifest.json"))
+}
+func readValidatedLayout(path string) (layoutManifest, error) {
 	var m layoutManifest
-	b, e := os.ReadFile(filepath.Join(s.analysisDir(id), "manifest.json"))
+	b, e := os.ReadFile(path)
 	if e != nil {
 		return m, e
 	}
@@ -252,7 +274,7 @@ func (s *Server) readLayout(id string) (layoutManifest, error) {
 	}
 	for _, b := range m.Blocks {
 		r := b.Bounds
-		if !blockIDPattern.MatchString(b.ID) || b.Page < 1 || b.Page > m.Pages || r.X < 0 || r.Y < 0 || r.Width <= 0 || r.Height <= 0 || r.X+r.Width > 1.001 || r.Y+r.Height > 1.001 || (b.Image != "" && b.Image != "assets/"+b.ID+".png") {
+		if !blockIDPattern.MatchString(b.ID) || b.Page < 1 || b.Page > m.Pages || r.X < 0 || r.Y < 0 || r.Width <= 0 || r.Height <= 0 || r.X+r.Width > 1.001 || r.Y+r.Height > 1.001 || (b.Image != "" && !validBlockImage(b)) {
 			return m, errors.New("版面位置无效")
 		}
 	}
@@ -277,6 +299,17 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 		return cancel
 	}
 	var workers sync.WaitGroup
+	if _, e := s.Store.DB.Exec("UPDATE document_overview_jobs SET status='queued' WHERE status='running'"); e != nil {
+		log.Printf("cannot recover document overviews: %v", e)
+	}
+	if _, e := s.Store.DB.Exec("UPDATE document_corpus_jobs SET status='queued' WHERE status='running'"); e != nil {
+		log.Printf("cannot recover document indexing: %v", e)
+	}
+	if _, e := s.Store.DB.Exec(`INSERT OR IGNORE INTO document_corpus_jobs(document_id,status)
+ SELECT d.id,'queued' FROM documents d LEFT JOIN document_corpora c ON c.document_id=d.id
+ WHERE c.document_id IS NULL AND d.deleted_at=''`); e != nil {
+		log.Printf("cannot queue document indexing: %v", e)
+	}
 	rows, e := s.Store.DB.Query("SELECT body FROM document_processing WHERE status='running' OR json_extract(body,'$.translating.status')='running'")
 	if e == nil {
 		var pending []Processing
@@ -347,6 +380,9 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 					s.finishProcessingTask(p.DocumentID, task)
 					continue
 				}
+				taskID := id()
+				taskStarted := time.Now()
+				s.diagnosticEvent(slog.LevelInfo, "processing.start", "taskId", taskID, "documentId", p.DocumentID, "phase", phase)
 				if phase == "learning" {
 					finishStage, stageErr := s.startUsageStage(p.DocumentID, "learning")
 					if stageErr != nil {
@@ -370,11 +406,22 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 					}
 					_ = s.Store.saveProcessing(p)
 				}
+				level := slog.LevelInfo
+				kind := ErrorKind("")
+				if e != nil {
+					level = slog.LevelError
+					kind = errorKind(e)
+				}
+				s.diagnosticEvent(level, "processing.finish", "taskId", taskID, "durationMs", time.Since(taskStarted).Milliseconds(), "documentId", p.DocumentID, "phase", phase, "errorCode", kind)
 				finish()
 				s.finishProcessingTask(p.DocumentID, task)
 			}
 		}(phase)
 	}
+	workers.Add(1)
+	go func() { defer workers.Done(); s.corpusWorker(ctx) }()
+	workers.Add(1)
+	go func() { defer workers.Done(); s.overviewWorker(ctx) }()
 	workers.Add(1)
 	go func() { defer workers.Done(); s.classificationWorker(ctx) }()
 	workers.Add(1)
@@ -382,6 +429,9 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 	return func() { cancel(); workers.Wait() }
 }
 func (s *Server) wakeProcessing() {
+	if _, err := s.Store.DB.Exec("UPDATE document_overview_jobs SET status='queued',error='' WHERE status='waiting'"); err != nil {
+		log.Printf("cannot wake overview jobs: %v", err)
+	}
 	s.processingMu.Lock()
 	defer s.processingMu.Unlock()
 	// Reset only jobs blocked on a missing connection, never interrupted/failed jobs.
@@ -413,6 +463,11 @@ func (s *Server) learnPDF(ctx context.Context, p *Processing) error {
 	if e != nil {
 		return e
 	}
+	// Persist the refresh before publishing changed layout, so an interrupted
+	// parse still prepares its index after restart.
+	if e = s.Store.queueDocumentCorpus(d.ID); e != nil {
+		return e
+	}
 	if d.Library == "books" {
 		if e = s.learnBookChapter(ctx, d, p); e != nil {
 			return e
@@ -442,6 +497,14 @@ func (s *Server) learnPDF(ctx context.Context, p *Processing) error {
 	if e != nil {
 		return e
 	}
+	// Publish searchable original passages as part of parsing, before the
+	// translation lane. Index failure must not invalidate a successful parse.
+	if _, indexErr := s.documentCorpus(ctx, d.ID, nil); indexErr != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		_ = s.Store.queueDocumentCorpus(d.ID)
+	}
 	p.PagesDone = m.Pages
 	p.PagesTotal = m.Pages
 	if len(m.Warnings) > 0 {
@@ -453,6 +516,14 @@ func (s *Server) learnPDF(ctx context.Context, p *Processing) error {
 		return e
 	}
 	p.TranslationsDone, p.TranslationsTotal = translationCounts(items)
+	if limit := p.AutoTranslateMaxPages; limit != nil && (*limit == 0 || m.Pages > *limit) {
+		p.Enabled = false
+		p.ManualTranslation = true
+		p.Phase, p.Status, p.Detail = "translating", "paused", "解析完成，等待手动翻译"
+		p.Translating = &ProcessingStage{Status: "paused", Detail: "等待手动翻译"}
+		return s.Store.saveProcessing(*p)
+	}
+	p.AutoTranslateMaxPages = nil
 	p.Translating = &ProcessingStage{Status: "queued", Detail: "等待翻译正文与公式"}
 	if p.TranslationsDone == p.TranslationsTotal {
 		p.Translating.Status = "complete"

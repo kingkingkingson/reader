@@ -1,3 +1,7 @@
+import { useShortcut } from "./shortcuts/shortcuts";
+import { SelectionTranslation } from "./SelectionTranslation";
+import { LinkPreviewPanel } from "./LinkPreviewPanel";
+import { AnnotationHoverCard } from "./AnnotationHoverCard";
 import { AnnotationQuote } from "./AnnotationQuote";
 import {
   useEffect,
@@ -6,8 +10,10 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
 } from "react";
 import {
+  Languages,
   ChartColumn,
   ArrowLeft,
   BookOpen,
@@ -42,7 +48,6 @@ import {
   type Annotation,
   type Document as ReaderDocument,
   type DocumentLocation,
-  type SourceReference,
   type ReaderAdapter,
   type ReaderSelection,
   type ReaderAnnotationTarget,
@@ -90,13 +95,15 @@ import {
   TooltipContent,
 } from "@reader/ui/components/tooltip";
 import { toast } from "sonner";
+import { DocumentOverviewDialog } from "./DocumentOverview";
 import { ProcessingUsageDialog } from "./ProcessingUsage";
 import { ModelSelector } from "./ModelSelector";
 import { SourceReferences } from "./SourceReferences";
 import { ChatSession } from "./chat/chat-session";
 import { AssistantPanel } from "./chat/AssistantPanel";
 import { ImagePreview, imageLabel } from "./ImagePreview";
-import { contextReferences } from "./references";
+import { readingContext } from "./chat/reading-context";
+import { referenceLabel } from "./references";
 import { ReferenceNavigation } from "./reference-navigation";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { AnnotationToolbar, annotationLabels } from "./AnnotationToolbar";
@@ -104,19 +111,19 @@ import { useAnnotationUndo } from "./useAnnotationUndo";
 import { useAnnotationDeletion } from "./useAnnotationDeletion";
 import {
   activeAnnotation,
-  annotationContext,
   applySavedAnnotation,
   highlightPalette,
 } from "./annotations";
 import { ColorSwatches } from "./ColorSwatches";
-import { copyText } from "./chat/clipboard";
+import { useSelectionClipboard } from "./useSelectionClipboard";
+import { copyImage, copyText } from "./chat/clipboard";
 import { NotesPanel } from "./NotesPanel";
-import { ExportNotesDialog } from "./ExportNotesDialog";
+import { ExportDocumentDialog } from "./ExportDocumentDialog";
 import { EPUBReadingView } from "./translation/EPUBReadingView";
 import { PDFReadingView } from "./translation/PDFReadingView";
 import { useReaderStore } from "./store";
 import { scheduleProgress, flushProgress } from "./progress";
-import { stepTranslationSize } from "./appearance";
+import { Slider } from "@reader/ui/components/slider";
 import { TranslationFontControls } from "./TranslationFontControls";
 function IconButton({
   label,
@@ -219,6 +226,7 @@ export function Workspace({
 }) {
   const { setTheme, aiConfig, setAIConfig, aiModelSaving } = useReaderStore();
   const translationSize = theme.translationFontSize ?? 1;
+  const assistantSize = theme.assistantFontScale ?? 1;
   const linkTarget = useReaderStore((s) => s.linkTarget);
   const [annotationsLoaded, setAnnotationsLoaded] = useState(false);
   const [blocks, setBlocks] = useState<PDFBlock[]>([]);
@@ -226,6 +234,8 @@ export function Workspace({
   const [readingToolbar, setReadingToolbar] = useState<HTMLDivElement | null>(
     null,
   );
+  const [sourceAutoCenterToolbar, setSourceAutoCenterToolbar] =
+    useState<HTMLDivElement | null>(null);
   const renderBlockImage = useMemo(
     () => adapter?.renderBlockImage?.bind(adapter),
     [adapter],
@@ -268,11 +278,13 @@ export function Workspace({
   const [location, setLocation] = useState<DocumentLocation | undefined>(
     doc.progress,
   );
+  const [translationSelection, setTranslationSelection] =
+    useState<ReaderSelection | null>(null);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const annotationSaving = useRef(false);
   const [noteSaving, setNoteSaving] = useState(false);
-  const lastCopiedSelection = useRef<string | null>(null);
+  const selectionClipboard = useSelectionClipboard(theme.autoCopySelection);
   const [annotationTarget, setAnnotationTarget] =
     useState<ReaderAnnotationTarget | null>(null);
   const { deleting, remove: removeAnnotation } = useAnnotationDeletion(
@@ -315,6 +327,7 @@ export function Workspace({
       group.removeAttribute("data-toggling");
     };
   }, [left, right, leftPanel, rightPanel]);
+  const [overviewOpen, setOverviewOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [rightTab, setRightTab] = useState("ai");
   const [leftTab, setLeftTab] = useState("toc");
@@ -389,23 +402,13 @@ export function Workspace({
     setSearchedQuery("");
     setSearching(false);
   }, [doc.id]);
-  useEffect(() => {
-    const find = (event: KeyboardEvent) => {
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        !event.shiftKey &&
-        !event.altKey &&
-        event.key.toLowerCase() === "f"
-      ) {
-        event.preventDefault();
-        setLeft(true);
-        setLeftTab("search");
-        requestAnimationFrame(() => searchInput.current?.focus());
-      }
-    };
-    window.addEventListener("keydown", find);
-    return () => window.removeEventListener("keydown", find);
-  }, []);
+  useShortcut("readerLeft", () => setLeft((value) => !value));
+  useShortcut("readerRight", () => setRight((value) => !value));
+  useShortcut("search", () => {
+    setLeft(true);
+    setLeftTab("search");
+    requestAnimationFrame(() => searchInput.current?.focus());
+  });
   useEffect(() => {
     let alive = true;
     session.activate();
@@ -441,7 +444,13 @@ export function Workspace({
     return () => {
       alive = false;
     };
-  }, [doc.id, doc.type, processing?.phase, processing?.status]);
+  }, [
+    doc.id,
+    doc.type,
+    processing?.phase,
+    processing?.status,
+    processing?.layoutRevision,
+  ]);
   const move = (next: DocumentLocation) => {
     void adapter?.goTo(next).catch((e) => toast.error(e.message));
   };
@@ -468,6 +477,7 @@ export function Workspace({
         .catch((e) => toast.error(e.message));
   }, [linkTarget, adapter, annotationsLoaded, annotations, doc.id, doc.type]);
   const saveLocation = (next: DocumentLocation, percent: number) => {
+    setTranslationSelection(null);
     setLocation(next);
     if (navigationRef.current?.settle()) setReturnLocation(undefined);
     if (next.type === "pdf") setPageInput(String(next.page));
@@ -533,24 +543,30 @@ export function Workspace({
     () => !annotationsLoaded || annotationSaving.current || noteOpen,
   );
 
+  const [hoveredAnnotation, setHoveredAnnotation] =
+    useState<ReaderAnnotationTarget | null>(null);
   const selectedAnnotation = annotationTarget
     ? activeAnnotation(annotations, annotationTarget.ids)
     : undefined;
   const selectAnnotation = (target: ReaderAnnotationTarget | null) => {
+    if (target) setTranslationSelection(null);
+    setHoveredAnnotation(null);
     setAnnotationTarget(target);
     const annotation = target
       ? activeAnnotation(annotations, target.ids)
       : undefined;
-    if (annotation?.quote) void copyText(annotation.quote, "已复制");
+    selectionClipboard.annotation(annotation);
   };
   const selectText = (next: ReaderSelection | null) => {
+    if (next) {
+      setHoveredAnnotation(null);
+      setTranslationSelection(null);
+    }
     setSelection(next);
-    const key = next ? JSON.stringify([next.text, next.location]) : null;
-    if (next?.text && key !== lastCopiedSelection.current)
-      void copyText(next.text, "已复制");
-    lastCopiedSelection.current = key;
+    selectionClipboard.selection(next);
   };
   const editAnnotationNote = (annotation: Annotation) => {
+    setHoveredAnnotation(null);
     setNoteKind(annotation.kind === "question" ? "question" : "note");
     setEditingAnnotation(annotation);
     setNoteSelection({ text: annotation.quote, location: annotation.location });
@@ -692,7 +708,7 @@ export function Workspace({
       question = "请解释附件中的图表或公式。";
     if (!question.trim()) return;
     if (!session.getSnapshot().loaded) {
-      toast.error("对话记录尚未加载，请重试同步。");
+      toast.error("对话记录尚未加载，请重新加载。");
       return;
     }
     setSending(true);
@@ -702,39 +718,22 @@ export function Workspace({
     abort.current = controller;
     const serial = ++sendSerial.current;
     try {
-      let context = selected
-        .map(
-          (s, i) => `[选区 ${i + 1} · ${locationLabel(s.location)}]\n${s.text}`,
-        )
-        .join("\n\n");
-      let references: SourceReference[] = selected.map(
-        ({ text, location }) => ({
-          text,
-          location,
-          kind: "selection",
-        }),
+      const captured = await readingContext(
+        adapter,
+        provider,
+        selected,
+        useSection,
+        attachments.length > 0,
       );
-      if (useSection || !context) {
-        const sourceLocation = adapter?.getLocation();
-        context = (await adapter?.getContext()) || "";
-        references = sourceLocation
-          ? contextReferences(context.slice(0, 21000), sourceLocation)
-          : [];
-      }
+      const { context } = captured;
       if (controller.signal.aborted) return;
-      // The reader's marks go last so they never displace the passage itself.
-      const marks = annotationContext(annotations, 4000, palette);
-      const passage = context.slice(
-        0,
-        marks ? 21000 - marks.length - 2 : 21000,
-      );
-      context = marks ? `${passage}\n\n${marks}` : passage;
       if (!directImage) setPrompt("");
       await session.send({
         provider,
         prompt: question,
         context,
-        references,
+        references: captured.references,
+        readingLocation: captured.readingLocation,
         attachments,
       });
       if (serial !== sendSerial.current) return;
@@ -763,7 +762,34 @@ export function Workspace({
       }
     }
   };
+  const regenerate = async () => {
+    const current = useReaderStore.getState();
+    if (abort.current || session.getSnapshot().busy || current.aiModelSaving)
+      return;
+    if (!current.aiConfig?.primary) {
+      onSettings();
+      return;
+    }
+    const serial = ++sendSerial.current;
+    setSending(true);
+    try {
+      await session.regenerate(current.aiConfig.primary);
+    } catch (error) {
+      if (serial === sendSerial.current) toast.error((error as Error).message);
+    } finally {
+      if (serial === sendSerial.current) setSending(false);
+    }
+  };
   const blockAction = (block: PDFBlock, action: PDFBlockAction) => {
+    if (action === "copy") {
+      if (block.image)
+        void copyImage(
+          blockImageURL(doc.id, block.id, block.image),
+          (block.caption || block.text).trim(),
+        );
+      else void copyText(block.text.trim(), "已复制");
+      return;
+    }
     if (!block.image) {
       if (action === "explain")
         void send("请解释这段原文的含义，区分原文结论与你的补充说明。", [
@@ -912,6 +938,9 @@ export function Workspace({
               返回阅读位置
             </Button>
           )}
+          <IconButton label="文档概要" onClick={() => setOverviewOpen(true)}>
+            <BookOpen />
+          </IconButton>
           <div ref={setReadingToolbar} />
           <span className="toolbar-divider" />
           {doc.type === "pdf" && (
@@ -950,6 +979,7 @@ export function Workspace({
               </IconButton>
             </div>
           )}
+          <div ref={setSourceAutoCenterToolbar} />
           <IconButton
             label="添加书签"
             onClick={() => void annotate("bookmark")}
@@ -965,21 +995,60 @@ export function Workspace({
               <Type />
             </PopoverTrigger>
             <PopoverContent className="w-72">
-              <h3 className="mb-4 text-sm font-medium">阅读外观</h3>
+              <h3 className="text-sm font-medium">阅读外观</h3>
               <div className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  {(["light", "sepia", "cream", "dark"] as const).map(
-                    (mode, i) => (
-                      <Button
-                        key={mode}
-                        size="sm"
-                        variant={theme.mode === mode ? "default" : "outline"}
-                        onClick={() => setTheme({ mode, appearance: mode })}
-                      >
-                        {["浅色", "纸张", "米黄", "深色"][i]}
-                      </Button>
-                    ),
-                  )}
+                <Tabs
+                  value={
+                    theme.mode === "dark"
+                      ? theme.pdfDarkContrast === "high"
+                        ? "dark"
+                        : "gray"
+                      : theme.mode
+                  }
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    const mode =
+                      value === "gray"
+                        ? "dark"
+                        : (value as "light" | "sepia" | "cream" | "dark");
+                    setTheme({
+                      mode,
+                      appearance: mode,
+                      ...(mode === "dark"
+                        ? {
+                            pdfDarkContrast: value === "gray" ? "soft" : "high",
+                          }
+                        : {}),
+                    });
+                  }}
+                >
+                  <TabsList className="w-full" aria-label="阅读配色">
+                    <TabsTrigger value="light">浅色</TabsTrigger>
+                    <TabsTrigger value="dark">深色</TabsTrigger>
+                    <TabsTrigger value="sepia">纸张</TabsTrigger>
+                    <TabsTrigger value="cream">米黄</TabsTrigger>
+                    <TabsTrigger value="gray">灰色</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <div className="flex items-center gap-3">
+                  <span className="shrink-0 text-sm">Agent 字号</span>
+                  <Slider
+                    className="reading-appearance-slider min-w-0 flex-1"
+                    thumbLabel="Agent 字号"
+                    min={80}
+                    max={160}
+                    step={5}
+                    value={[Math.round(assistantSize * 100)]}
+                    onValueChange={(value) =>
+                      setTheme({
+                        assistantFontScale:
+                          (Array.isArray(value) ? value[0] : value) / 100,
+                      })
+                    }
+                  />
+                  <span className="w-10 text-right text-xs tabular-nums">
+                    {Math.round(assistantSize * 100)}%
+                  </span>
                 </div>
                 {doc.type === "epub" ? (
                   <>
@@ -1060,52 +1129,66 @@ export function Workspace({
                   </>
                 ) : (
                   <>
-                    <div className="flex gap-2">
-                      {(["width", 1, 1.25, 1.5] as const).map((zoom) => (
-                        <Button
-                          key={zoom}
-                          size="sm"
-                          variant={theme.zoom === zoom ? "default" : "outline"}
-                          onClick={() => setTheme({ zoom })}
-                        >
-                          {zoom === "width" ? "适宽" : `${zoom * 100}%`}
-                        </Button>
-                      ))}
+                    <div className="flex items-center gap-3">
+                      <span className="shrink-0 text-sm">原文缩放</span>
+                      <Slider
+                        className="reading-appearance-slider min-w-0 flex-1"
+                        thumbLabel="原文缩放"
+                        min={50}
+                        max={300}
+                        step={5}
+                        value={[
+                          typeof theme.zoom === "number"
+                            ? Math.round(theme.zoom * 100)
+                            : 100,
+                        ]}
+                        onValueChange={(value) =>
+                          setTheme({
+                            zoom:
+                              (Array.isArray(value) ? value[0] : value) / 100,
+                          })
+                        }
+                      />
+                      <span className="w-10 text-right text-xs tabular-nums">
+                        {typeof theme.zoom === "number"
+                          ? `${Math.round(theme.zoom * 100)}%`
+                          : "自动"}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setTheme({ zoom: "width" })}
+                      >
+                        适宽
+                      </Button>
                     </div>
                   </>
                 )}
-                <div className="setting-row">
-                  <span>译文字号</span>
-                  <Button
-                    size="icon-xs"
-                    variant="outline"
-                    aria-label="减小译文字号"
-                    onClick={() =>
+                <div className="flex items-center gap-3">
+                  <span className="shrink-0 text-sm">译文字号</span>
+                  <Slider
+                    className="reading-appearance-slider min-w-0 flex-1"
+                    thumbLabel="译文字号"
+                    min={80}
+                    max={160}
+                    step={5}
+                    value={[Math.round(translationSize * 100)]}
+                    onValueChange={(value) =>
                       setTheme({
-                        translationFontSize: stepTranslationSize(
-                          translationSize,
-                          -1,
-                        ),
+                        translationFontSize:
+                          (Array.isArray(value) ? value[0] : value) / 100,
                       })
                     }
-                  >
-                    −
-                  </Button>
-                  <span>{Math.round(translationSize * 100)}%</span>
+                  />
+                  <span className="w-10 text-right text-xs tabular-nums">
+                    {Math.round(translationSize * 100)}%
+                  </span>
                   <Button
-                    size="icon-xs"
+                    size="sm"
                     variant="outline"
-                    aria-label="增大译文字号"
-                    onClick={() =>
-                      setTheme({
-                        translationFontSize: stepTranslationSize(
-                          translationSize,
-                          1,
-                        ),
-                      })
-                    }
+                    onClick={() => setTheme({ translationFontSize: 1 })}
                   >
-                    +
+                    恢复
                   </Button>
                 </div>
                 <TranslationFontControls theme={theme} setTheme={setTheme} />
@@ -1113,7 +1196,7 @@ export function Workspace({
             </PopoverContent>
           </Popover>
           <IconButton
-            label="AI 与批注"
+            label="Agent 与批注"
             active={right}
             expanded={right}
             onClick={() => setRight(!right)}
@@ -1246,12 +1329,14 @@ export function Workspace({
                 doc.type === "pdf" ? PDFReadingView : EPUBReadingView;
               return (
                 <ReadingView
+                  sidebarsOpen={{ left, right }}
                   document={doc}
                   theme={theme}
                   annotations={annotations}
                   blocks={blocks}
                   processing={processing}
                   toolbarHost={readingToolbar}
+                  autoCenterHost={sourceAutoCenterToolbar}
                   pageNavigation={pageNavigation}
                   searchResults={results}
                   searchQuery={searchedQuery}
@@ -1264,6 +1349,14 @@ export function Workspace({
                     location: saveLocation,
                     selection: selectText,
                     annotation: selectAnnotation,
+                    annotationHover: (target) =>
+                      setHoveredAnnotation((current) =>
+                        current &&
+                        target &&
+                        current.ids.join(",") === target.ids.join(",")
+                          ? current
+                          : target,
+                      ),
                     linkPreview: setLinkPreview,
                     internalLink: (origin) => {
                       navigationRef.current?.remember(origin);
@@ -1343,6 +1436,16 @@ export function Workspace({
                 <IconButton label="引用到对话" onClick={addQuote}>
                   <Quote />
                 </IconButton>
+                <IconButton
+                  label="划词翻译"
+                  onClick={() => {
+                    setTranslationSelection(selection);
+                    setSelection(null);
+                    adapter?.clearSelection();
+                  }}
+                >
+                  <Languages />
+                </IconButton>
               </SelectionToolbar>
             )}
           </div>
@@ -1370,7 +1473,7 @@ export function Workspace({
               <TabsList className="panel-tabs">
                 <TabsTrigger value="ai">
                   <Sparkles className="size-3.5" />
-                  AI 助读
+                  Agent
                 </TabsTrigger>
                 <TabsTrigger value="notes">
                   <StickyNote className="size-3.5" />
@@ -1386,10 +1489,29 @@ export function Workspace({
                   <ChartColumn />
                 </Button>
               </TabsList>
-              <TabsContent value="ai" className="ai-panel">
+              <TabsContent
+                value="ai"
+                className="ai-panel"
+                style={
+                  { "--assistant-font-scale": assistantSize } as CSSProperties
+                }
+              >
                 <AssistantPanel
                   key={doc.id}
                   session={session}
+                  onRegenerate={() => void regenerate()}
+                  regenerateDisabled={aiModelSaving || sending}
+                  renderAnswer={(message, content) => (
+                    <SourceReferences
+                      key={message.id}
+                      message={message}
+                      toc={toc}
+                      adapter={adapter}
+                      onNavigate={visitReference}
+                    >
+                      {content}
+                    </SourceReferences>
+                  )}
                   empty={
                     <div className="chat-empty">
                       <p>
@@ -1432,9 +1554,8 @@ export function Workspace({
                         <ArrowLeft className="ml-auto rotate-180" />
                       </Button>
                       <p className="privacy-note">
-                        对话发送所选文字或当前
-                        {doc.type === "epub" ? "章节" : "页面"}给 AI。PDF
-                        图表按主 Agent 设置自动预处理。
+                        主动引用的文字和图片随问题发送；文档 Agent
+                        按需检索、读取原文。
                       </p>
                     </div>
                   }
@@ -1445,12 +1566,23 @@ export function Workspace({
                     </>
                   )}
                   references={(message) => (
-                    <SourceReferences
-                      message={message}
-                      toc={toc}
-                      adapter={adapter}
-                      onNavigate={visitReference}
-                    />
+                    <>
+                      {message.readingLocation && (
+                        <span
+                          className="chat-reading-location"
+                          title="提问时的阅读位置"
+                        >
+                          <BookOpen size={12} aria-hidden="true" />
+                          {referenceLabel(message.readingLocation, toc)}
+                        </span>
+                      )}
+                      <SourceReferences
+                        message={message}
+                        toc={toc}
+                        adapter={adapter}
+                        onNavigate={visitReference}
+                      />
+                    </>
                   )}
                 />
                 <div className="chat-compose">
@@ -1549,37 +1681,27 @@ export function Workspace({
         </ResizablePanel>
       </ResizablePanelGroup>
 
-      <Popover
-        open={!!linkPreview}
-        onOpenChange={(open) => !open && setLinkPreview(null)}
-      >
-        {linkPreview && (
-          <PopoverContent
-            anchor={{
-              getBoundingClientRect: () =>
-                DOMRect.fromRect({
-                  x: linkPreview.anchor.left,
-                  y: linkPreview.anchor.top,
-                  width: linkPreview.anchor.width,
-                  height: linkPreview.anchor.height,
-                }),
-            }}
-            side="bottom"
-            initialFocus={false}
-            finalFocus={false}
-            className="link-preview"
-          >
-            <img
-              src={linkPreview.image}
-              alt={`第 ${linkPreview.page} 页链接目标`}
-              style={{ aspectRatio: linkPreview.ratio }}
-            />
-            <span className="text-xs text-muted-foreground">
-              第 {linkPreview.page} 页 · 点击跳转
-            </span>
-          </PopoverContent>
-        )}
-      </Popover>
+      <SelectionTranslation
+        key={doc.id}
+        selection={translationSelection}
+        onClose={() => setTranslationSelection(null)}
+      />
+      <AnnotationHoverCard
+        target={!selection && !noteOpen ? hoveredAnnotation : null}
+        annotations={annotations}
+        onEdit={editAnnotationNote}
+      />
+      <LinkPreviewPanel
+        key={doc.id}
+        preview={linkPreview}
+        onDismiss={() => setLinkPreview(null)}
+        onNavigate={(location) =>
+          void visitReference(location, "").catch((error) =>
+            toast.error(String(error)),
+          )
+        }
+        renderKey={`${theme.mode}:${theme.pdfDarkImageMode}:${theme.pdfDarkContrast}`}
+      />
       {previewImage && (
         <ImagePreview
           key={previewImage.id}
@@ -1673,7 +1795,8 @@ export function Workspace({
         </DialogContent>
       </Dialog>
       {exportingNotes && (
-        <ExportNotesDialog
+        <ExportDocumentDialog
+          key={`export-${doc.id}`}
           document={doc}
           annotations={annotations}
           messages={chat.messages}
@@ -1681,6 +1804,14 @@ export function Workspace({
           onClose={() => setExportingNotes(false)}
         />
       )}
+      <DocumentOverviewDialog
+        key={doc.id}
+        document={overviewOpen ? doc : null}
+        onClose={() => setOverviewOpen(false)}
+        onNavigate={async (location) => {
+          await adapter?.goTo(location);
+        }}
+      />
       <ProcessingUsageDialog
         document={usageOpen ? doc : null}
         onClose={() => setUsageOpen(false)}

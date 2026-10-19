@@ -2,10 +2,16 @@
 // Add a topic here to show it in the guide; mark it `onboarding` to also
 // include it in the first-run walkthrough, in this order.
 import {
+  Award,
   BookOpenText,
+  BookSearch,
   Bot,
   FileUp,
+  FolderInput,
+  Highlighter,
+  Palette,
   SlidersHorizontal,
+  SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
 import type { SceneId } from "./scenes";
@@ -88,7 +94,7 @@ export const guideTopics: GuideTopic[] = [
       {
         id: "pdf",
         title: "导入本地 PDF",
-        body: "把 PDF 拖进窗口即可导入，也可以在「导入论文」中点「选择 PDF 文件」。论文导入后默认自动翻译全文，可在「设置 → 论文库」中关闭。",
+        body: "把 PDF 拖进窗口即可导入，也可以在「导入论文」中点「选择 PDF 文件」。论文导入后先在本地解析，默认不超过 50 页时自动翻译。可在「设置 → 论文库」调整页数阈值，0 表示全部手动翻译。",
         scene: "pdf",
       },
     ],
@@ -107,9 +113,115 @@ export const guideTopics: GuideTopic[] = [
       },
       {
         id: "assistant",
-        title: "侧栏 AI 助读",
-        body: "选中文字后，在浮动工具栏点「问 AI」，回答会出现在右侧 AI 助读栏。也可以把多段文字引用到对话，或直接在底部输入框提问。",
+        title: "侧栏 Agent",
+        body: "选中文字后，在浮动工具栏点「问 AI」，回答会出现在右侧 Agent 栏。也可以把多段文字引用到对话，或直接在底部输入框提问。",
         scene: "assistant",
+      },
+    ],
+  },
+  {
+    id: "ai-reading",
+    title: "AI 深度阅读",
+    icon: BookSearch,
+    steps: [
+      {
+        id: "research",
+        title: "AI 自主检索原文",
+        body: "使用 Codex 或支持工具调用的 API 模型时，AI 会根据问题自己查看目录、检索原文并补读相关章节，侧栏会显示它正在检索的关键词和阅读位置。点击回答下方的「引用原文」，可以跳回原文并高亮对应段落。",
+        scene: "research",
+      },
+      {
+        id: "pages",
+        title: "查看 PDF 原图与思考过程",
+        body: "问到图表、表格或公式时，具备图片能力的模型会主动查看对应页的 PDF 原图再回答。API 模型返回的思考内容收在「思考过程」里，可展开查看，不混入回答正文。",
+        scene: "pages",
+      },
+      {
+        id: "overview",
+        title: "生成文档概要",
+        body: "点击阅读工具栏的书本图标，或在书库中右键选择「文档概要」，即可生成概要、主要内容、限制和原文术语。长文档会分段汇总，结果会保存下来，AI 回答时可以复用。也可以在「设置 → 阅读」中开启导入后自动生成。",
+        scene: "overview",
+      },
+    ],
+  },
+  {
+    id: "collect",
+    title: "收录与迁移",
+    icon: FolderInput,
+    action: { kind: "import", label: "导入论文" },
+    steps: [
+      {
+        id: "zotero",
+        title: "从 Zotero 迁移",
+        body: "在「导入论文」中点击「从 Zotero 导入」，选择 Zotero 资料目录并扫描，预览后可导入 PDF、论文信息、分类、标签、笔记和可转换的批注。扫描前请完全退出 Zotero；Zotero 中的原数据保持不变。",
+        scene: "zotero",
+      },
+      {
+        id: "connector",
+        title: "从浏览器收录",
+        body: "从 Chrome 网上应用店安装 Reader Connector。在论文页面点击插件图标，选择分类和标签后即可把 PDF 收录到论文库。收录时需要保持 Reader 打开。",
+        scene: "connector",
+      },
+    ],
+  },
+  {
+    id: "notes",
+    title: "批注与导出",
+    icon: Highlighter,
+    steps: [
+      {
+        id: "hover-note",
+        title: "悬停查看批注",
+        body: "阅读 EPUB 原文或译文时，将鼠标移到带笔记的高亮上，旁边会直接显示笔记内容，点击铅笔图标即可编辑。",
+        scene: "hoverNote",
+      },
+      {
+        id: "export-pdf",
+        title: "导出带批注的 PDF",
+        body: "在书库中右键 PDF 并选择「导出带批注的 PDF」，或在笔记栏的导出中选择该项。Reader 会将高亮、下划线、笔记以及问题和回答写入 PDF 副本，原文件保持不变。",
+        scene: "exportPdf",
+      },
+    ],
+  },
+  {
+    id: "appearance",
+    title: "阅读外观",
+    icon: Palette,
+    action: { kind: "settings", label: "打开设置" },
+    steps: [
+      {
+        id: "themes",
+        title: "深色与灰色阅读",
+        body: "点击阅读工具栏中的「阅读外观」，可在浅色、深色、纸张和灰色之间切换，PDF 原文也会随之换色。原文缩放、译文字号和 Agent 字号都可以用滑块调整。深色模式下的图片处理方式可在「设置 → 显示」中选择。",
+        scene: "appearance",
+      },
+    ],
+  },
+  {
+    id: "journal-ranks",
+    title: "期刊评级",
+    icon: Award,
+    action: { kind: "settings", label: "打开设置" },
+    steps: [
+      {
+        id: "ranks",
+        title: "在论文库查看期刊评级",
+        body: "在「设置 → 论文库」的期刊指标中填写 easyScholar SecretKey 并保存，论文标题旁就会显示 CCF、SCI 分区、中科院分区、影响因子等指标。可以只显示选中的指标，不需要时关闭即可。",
+        scene: "ranks",
+      },
+    ],
+  },
+  {
+    id: "cli",
+    title: "命令行",
+    icon: SquareTerminal,
+    action: { kind: "settings", label: "打开设置" },
+    steps: [
+      {
+        id: "cli",
+        title: "安装 reader 命令",
+        body: "在「设置 → Agent → 命令行工具」中安装 reader 命令后，可以在终端检索、阅读和导入书库中的文档，也可以让 Claude Code、Codex 等 Agent 直接调用。使用时需要保持 Reader 打开。",
+        scene: "cli",
       },
     ],
   },

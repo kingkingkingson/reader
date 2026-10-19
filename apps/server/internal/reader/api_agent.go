@@ -7,16 +7,18 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
-// The "api" agent calls an OpenAI-compatible Chat Completions endpoint with a
+// The "api" agent calls a protocol-aware endpoint with a
 // user-supplied key. Its models come from /models plus IDs the user adds, and
 // each model is checked separately for text and vision. Requests use only
 // models that passed: text requests the task's model, image requests the
-// vision model. Effort is sent only when the model advertises it.
+// vision model. Unknown relays without metadata use low/medium/high.
 type apiAgentAdapter struct {
 	conn         APIConnection
 	text, vision apiModelChoice
@@ -82,8 +84,8 @@ func (s *Server) apiAgentAdapter(c AIConfig, task modelTask) apiAgentAdapter {
 	}}
 }
 
-// resolve fixes the model and native effort for one request. A chosen model
-// still works when the catalog is unavailable; only effort is then omitted.
+// resolve fixes the model and requested effort for one request. Wire mapping
+// is applied by the endpoint/model profile, even when the catalog is unavailable.
 func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRequest, error) {
 	if e := validateAgentAPI(a.conn); e != nil {
 		return completionRequest{}, generationError(ErrorConfiguration, e.Error())
@@ -95,7 +97,7 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 	if vision {
 		choice, task = a.vision, taskVision
 	}
-	req := completionRequest{Model: choice.model}
+	req := completionRequest{Model: choice.model, Effort: choice.level}
 	models, err := a.catalog(ctx)
 	if err != nil {
 		if req.Model == "" {
@@ -115,17 +117,61 @@ func (a apiAgentAdapter) resolve(ctx context.Context, vision bool) (completionRe
 		return req, generationError(ErrorCapability, "没有通过文本推理检测的 API 模型")
 	}
 	for _, m := range models {
-		if m.ID == req.Model && len(m.SupportedEfforts) > 0 && choice.level != "" {
-			req.Effort = nativeEffort("api", choice.level, m.ID, models)
+		if m.ID == req.Model {
+			req.ContextWindow = m.ContextWindow
+			req.SupportedEfforts = m.SupportedEfforts
 		}
 	}
 	return req, nil
+}
+
+// API catalogs do not have to publish reasoning capabilities. Use the standard
+// tiers in that case, including for manually added IDs and catalog failures.
+// Equal-distance choices prefer the stronger tier.
+func apiEffort(level string, supported []string) string {
+	// Capability probes intentionally have no effort; configured task choices
+	// already supply medium when the user has not selected a level.
+	if level == "" {
+		return ""
+	}
+	tiers := []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+	target := slices.Index(tiers, level)
+	if target < 0 {
+		target = slices.Index(tiers, "medium")
+	}
+	if len(supported) == 0 {
+		supported = []string{"low", "medium", "high"}
+	}
+	best, distance := "", len(tiers)+1
+	for i, tier := range tiers {
+		if !slices.Contains(supported, tier) {
+			continue
+		}
+		delta := i - target
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta <= distance {
+			best, distance = tier, delta
+		}
+	}
+	return best
 }
 
 func (a apiAgentAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
 	completion, err := a.resolve(ctx, len(req.Input.images()) > 0)
 	if err != nil {
 		return GenerateResult{}, err
+	}
+	if req.Input.Chat != nil && req.Input.Chat.Agent != nil && a.task == taskChat && len(req.Input.images()) == 0 {
+		agent := req.Input.Chat.Agent
+		capability, err := agent.server.ensureDocumentTools(ctx, a.conn, completion.Model, agent.activity)
+		if err != nil {
+			return GenerateResult{}, err
+		}
+		completion.Tools = capability.Tools == "passed"
+		completion.Vision = capability.Vision
+		return streamAPIDocumentChat(ctx, a.conn, completion, req.Input, emit)
 	}
 	return streamCompletion(ctx, a.conn, completion, req.Input, emit)
 }
@@ -151,23 +197,33 @@ func (s *apiTranslationSession) Stream(ctx context.Context, req GenerateRequest,
 		return GenerateResult{}, err
 	}
 	completion.History = s.history
+	var reasoning strings.Builder
+	if reasoningRule(resolveAPIEndpoint(s.conn), completion.Model, completion.SupportedEfforts).Preserve {
+		completion.ReasoningSink = func(part string) { reasoning.WriteString(part) }
+	}
 	result, err := streamCompletion(ctx, s.conn, completion, req.Input, emit)
 	if err != nil {
 		return result, err
 	}
 	s.record(req.Input.Prompt, result.Text)
+	s.history[len(s.history)-1].Reasoning = reasoning.String()
+	s.size += reasoning.Len()
+	s.trim()
 	return result, nil
 }
 
 func (s *apiTranslationSession) record(prompt, answer string) {
-	s.history = append(s.history, completionMessage{"user", prompt}, completionMessage{"assistant", answer})
+	s.history = append(s.history, completionMessage{Role: "user", Content: prompt}, completionMessage{Role: "assistant", Content: answer})
 	s.size += len(prompt) + len(answer)
+	s.trim()
+}
+func (s *apiTranslationSession) trim() {
 	if s.size <= apiTranslationHistoryBytes {
 		return
 	}
 	// Keep at least the latest turn, even when it alone exceeds the budget.
 	for len(s.history) > 2 && s.size > apiTranslationHistoryBytes/2 {
-		s.size -= len(s.history[0].Content.(string)) + len(s.history[1].Content.(string))
+		s.size -= len(s.history[0].Content.(string)) + len(s.history[1].Content.(string)) + len(s.history[1].Reasoning)
 		s.history = s.history[2:]
 	}
 }
@@ -179,7 +235,7 @@ func (s *apiTranslationSession) close() {
 // apiCatalog binds model discovery to one endpoint snapshot. The cache key
 // covers the URL and key, so an edited connection never reuses another list.
 func (s *Server) apiCatalog(c APIConnection) func(context.Context) ([]AgentModel, error) {
-	sum := sha256.Sum256([]byte(c.URL + "\x00" + c.Key))
+	sum := sha256.Sum256([]byte(c.URL + "\x00" + c.Key + "\x00" + c.Protocol))
 	key := "api:" + hex.EncodeToString(sum[:])
 	return func(ctx context.Context) ([]AgentModel, error) {
 		return s.cachedCatalog(ctx, key, func(ctx context.Context) ([]AgentModel, error) {
@@ -206,6 +262,7 @@ func (s *Server) apiAgentModels(ctx context.Context, c AIConfig) ([]AgentModel, 
 		return nil, err
 	}
 	for i := range models {
+		models[i].EffortInfo = reasoningRule(resolveAPIEndpoint(c.API), models[i].ID, models[i].SupportedEfforts).info()
 		key := apiCapabilityKey(models[i].ID)
 		if result, ok := c.Capabilities[key]; ok && result.Fingerprint == configPrint(c, key) {
 			models[i].Capability = &result
@@ -234,7 +291,12 @@ func (s *Server) apiAgentModels(ctx context.Context, c AIConfig) ([]AgentModel, 
 	return models, nil
 }
 
-func discoverAPIModels(ctx context.Context, c APIConnection) ([]AgentModel, error) {
+func discoverAPIModels(ctx context.Context, c APIConnection) (models []AgentModel, err error) {
+	ctx, _ = traceAPI(ctx, c, "")
+	started := time.Now()
+	apiLog(ctx, slog.LevelInfo, "api.start", "operation", "models")
+	defer func() { logAPIFinish(ctx, started, err) }()
+
 	if e := validateAgentAPI(c); e != nil {
 		return nil, generationError(ErrorConfiguration, e.Error())
 	}
@@ -247,15 +309,27 @@ func discoverAPIModels(ctx context.Context, c APIConnection) ([]AgentModel, erro
 	if err != nil {
 		return nil, generationError(ErrorNetwork, "API 模型列表读取失败")
 	}
+	if hasAPIError(body) {
+		return nil, providerFailure(ctx, c, response.StatusCode, response.Header, body, "catalog")
+	}
 	return decodeAPIModels(body)
 }
 
-// Only id is standard. Name and effort levels are optional provider extensions.
+// Only id is standard. DeepSeek context_window and OpenRouter context_length
+// are optional metadata, never inferred from a model name.
 func decodeAPIModels(body []byte) ([]AgentModel, error) {
 	var result struct {
 		Data []struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
+			ID              string `json:"id"`
+			DisplayName     string `json:"display_name"`
+			Name            string `json:"name"`
+			ContextWindow   int    `json:"context_window"`
+			ContextLength   int    `json:"context_length"`
+			MaxOutputTokens int    `json:"max_output_tokens"`
+			TopProvider     struct {
+				ContextLength   int `json:"context_length"`
+				MaxOutputTokens int `json:"max_completion_tokens"`
+			} `json:"top_provider"`
 			Effort struct {
 				Levels  []string `json:"supported_levels"`
 				Default string   `json:"default_level"`
@@ -275,9 +349,23 @@ func decodeAPIModels(body []byte) ([]AgentModel, error) {
 		seen[id] = true
 		name := strings.TrimSpace(m.Name)
 		if name == "" {
+			name = strings.TrimSpace(m.DisplayName)
+		}
+		if name == "" {
 			name = id
 		}
-		models = append(models, AgentModel{ID: id, Name: name, SupportedEfforts: m.Effort.Levels, DefaultEffort: m.Effort.Default})
+		window := validContextWindow(m.ContextWindow)
+		if window == 0 {
+			window = validContextWindow(m.ContextLength)
+		}
+		if n := validContextWindow(m.TopProvider.ContextLength); n > 0 && (window == 0 || n < window) {
+			window = n
+		}
+		output := validContextWindow(m.MaxOutputTokens)
+		if output == 0 {
+			output = validContextWindow(m.TopProvider.MaxOutputTokens)
+		}
+		models = append(models, AgentModel{ID: id, Name: name, ContextWindow: window, MaxOutputTokens: output, SupportedEfforts: m.Effort.Levels, DefaultEffort: m.Effort.Default})
 	}
 	if len(models) == 0 {
 		return nil, errors.New("API 未返回可用模型")

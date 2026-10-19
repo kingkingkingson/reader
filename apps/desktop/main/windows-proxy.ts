@@ -61,7 +61,8 @@ function bypassEntries(entry: string): string[] {
       .slice(0, prefix)
       .every((part) => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255)
   )
-    throw new Error("Windows 系统代理包含不支持的直连例外");
+    // Skip unsupported bypass rules instead of failing the entire proxy config
+    return [];
   const network = octets.slice(0, prefix);
   const start = [...network, ...Array<string>(4 - prefix).fill("0")].join(".");
   const end = [...network, ...Array<string>(4 - prefix).fill("255")].join(".");

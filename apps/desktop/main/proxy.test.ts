@@ -90,14 +90,44 @@ describe("system proxy environment", () => {
     { ProxyAutoDiscoveryEnable: 1 },
     { HTTPSEnable: 1, HTTPSProxy: "127.0.0.1", HTTPSPort: 0 },
     { HTTPSEnable: 1, HTTPSProxy: "user@host", HTTPSPort: 7890 },
-    {
-      HTTPEnable: 1,
-      HTTPProxy: "localhost",
-      HTTPPort: 7890,
-      ExceptionsList: ["foo*bar"],
-    },
   ])("rejects unreadable or unsupported configuration: %j", (settings) => {
     expect(() => systemProxyEnvironment({}, settings)).toThrow();
+  });
+
+  it("tolerates unsupported bypass rules without failing the proxy", () => {
+    const env = systemProxyEnvironment(
+      {},
+      {
+        HTTPSEnable: 1,
+        HTTPSProxy: "127.0.0.1",
+        HTTPSPort: 7890,
+        ExceptionsList: [
+          "example.com",
+          "172.2*", // partial wildcard - unsupported, should be skipped
+          "*jd.com", // domain wildcard - unsupported, should be skipped
+          "192.168.*", // IP wildcard - unsupported, should be skipped
+          "valid.example.org",
+        ],
+      },
+    );
+    expect(env.HTTPS_PROXY).toBe("http://127.0.0.1:7890");
+    expect(env.NO_PROXY).toBe(
+      "localhost,127.0.0.1,::1,example.com,valid.example.org",
+    );
+  });
+
+  it("preserves valid bypass rules when some are unsupported", () => {
+    const env = systemProxyEnvironment(
+      {},
+      {
+        HTTPEnable: 1,
+        HTTPProxy: "localhost",
+        HTTPPort: 7890,
+        ExceptionsList: ["*.local", "foo*bar", "example.com"],
+      },
+    );
+    expect(env.HTTP_PROXY).toBe("http://localhost:7890");
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1,::1,.local,example.com");
   });
 
   it("preserves other platforms' environment", async () => {

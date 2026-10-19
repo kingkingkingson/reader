@@ -19,7 +19,8 @@ export class PDFAnnotationLayer {
     this.paint();
   }
   paint = () => {
-    this.clear();
+    // Rendering can refresh annotations between pointerdown and click. Keep the
+    // gesture alive; removing the old markers also removes their hover state.
     this.host
       .querySelectorAll(".reader-annotation")
       .forEach((el) => el.remove());

@@ -77,6 +77,16 @@ it("leaves out unchosen parts and counts what each part holds", () => {
   });
 });
 
+it("omits the duplicate document heading when combining notes with translation", () => {
+  const md = notesMarkdown(doc, data, ["paperNote"], undefined, {
+    includeTitle: false,
+  });
+  expect(md).toBe("## 论文笔记\n\nMain idea\n");
+  expect(
+    notesMarkdown(doc, data, [], undefined, { includeTitle: false }).trim(),
+  ).toBe("");
+});
+
 it("quotes annotations into the paper note once, in reading order", () => {
   const link = (a: Annotation) => `reader://open?id=p&annotation=${a.id}`;
   const marks = [

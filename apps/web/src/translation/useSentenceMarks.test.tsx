@@ -35,7 +35,12 @@ const t: TranslationBlock = {
 const blocks = [
   { id: t.blockId, page: 1, bounds: { x: 0, y: 0, width: 1, height: 1 } },
 ] as PDFBlock[];
-const events = { location: vi.fn(), selection: vi.fn(), annotation: vi.fn() };
+const events = {
+  location: vi.fn(),
+  selection: vi.fn(),
+  annotation: vi.fn(),
+  annotationHover: vi.fn(),
+};
 let host: HTMLDivElement, root: Root;
 const registry = new Map<string, Set<Range>>();
 const box = (x: number) => new DOMRect(x, 0, 100, 20);
@@ -138,6 +143,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   events.annotation.mockClear();
+  events.annotationHover.mockClear();
   window.getSelection()?.removeAllRanges();
 });
 const hover = () =>
@@ -198,7 +204,7 @@ it("highlights both sentence texts in either direction, clears on drag, and keep
   await pointer("[data-sentence]", "pointerdown", 210, 1);
   expect(hover()).toBeUndefined();
 });
-it("disabling association preserves local hover and translated marks, then re-enables the counterpart", async () => {
+it("keeps legacy translated marks single-sided regardless of hover association", async () => {
   const annotation: Annotation = {
     id: "a",
     documentId: "doc",
@@ -228,7 +234,10 @@ it("disabling association preserves local hover and translated marks, then re-en
     root.render(<App linked={false} annotations={[annotation]} />),
   );
   await pointer("[data-sentence]", "pointermove", 210);
-  expect(texts(hover())).toEqual(["翻译句子。"]);
+  expect(hover()).toBeUndefined();
+  expect(events.annotationHover).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ids: ["a"] }),
+  );
   let mark = [...registry.entries()].find(([name]) =>
     name.includes("-underline-"),
   )!;
@@ -237,10 +246,15 @@ it("disabling association preserves local hover and translated marks, then re-en
   mark = [...registry.entries()].find(([name]) =>
     name.includes("-underline-"),
   )!;
-  expect(texts(mark[1])).toEqual(["翻译", "Original sentence."]);
+  expect(texts(mark[1])).toEqual(["翻译"]);
   expect(document.head.textContent).toContain("underline 2px #5b9fe8");
+  await pointer("[data-source]", "pointermove", 10);
+  expect(events.annotationHover).toHaveBeenLastCalledWith(null);
   await pointer("[data-source]", "pointerdown", 10, 1);
   await pointer("[data-source]", "click", 10);
+  expect(events.annotation).not.toHaveBeenCalled();
+  await pointer("[data-sentence]", "pointerdown", 210, 1);
+  await pointer("[data-sentence]", "click", 210);
   expect(events.annotation).toHaveBeenCalledWith(
     expect.objectContaining({ ids: ["a"] }),
   );
@@ -249,7 +263,7 @@ it("disabling association preserves local hover and translated marks, then re-en
     [...registry.keys()].some((name) => name.includes("-underline-")),
   ).toBe(false);
 });
-it("projects a source note onto the complete translated sentence and removes stale projections", async () => {
+it("does not project legacy source notes onto translated sentences", async () => {
   const a: Annotation = {
     id: "a",
     documentId: "doc",
@@ -269,7 +283,7 @@ it("projects a source note onto the complete translated sentence and removes sta
     },
   };
   await act(async () => root.render(<App annotations={[a]} />));
-  expect(texts([...registry.values()][0])).toEqual(["翻译句子。"]);
+  expect(registry.size).toBe(0);
   await act(async () =>
     root.render(
       <App
@@ -390,3 +404,40 @@ it("waits for dwell, tolerates line gaps, and cancels pending work on interrupti
   await advance(600);
   expect(hover()).toBeUndefined();
 });
+
+it.each(["highlight", "underline", "note"] as const)(
+  "suppresses the whole marked source sentence for %s, previews without selecting, and restores after deletion",
+  async (kind) => {
+    const annotation: Annotation = {
+      id: "source-mark",
+      documentId: "doc",
+      kind,
+      quote: "Original",
+      note: "具体批注",
+      color: "#e6b94c",
+      createdAt: "",
+      location: {
+        type: "pdf",
+        page: 1,
+        rects: [{ x: 0, y: 0, width: 0.2, height: 1 }],
+      },
+    };
+    await act(async () => root.render(<App annotations={[annotation]} />));
+    // Hover the unmarked part of the same sentence.
+    await pointer("[data-source]", "pointermove", 70);
+    expect(hover()).toBeUndefined();
+    expect(events.annotationHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ids: [annotation.id] }),
+    );
+    expect(events.annotation).not.toHaveBeenCalled();
+    await pointer("[data-source]", "pointerleave", 70);
+    expect(events.annotationHover).toHaveBeenLastCalledWith(null);
+    await pointer("[data-source]", "pointermove", 70);
+    expect(events.annotationHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ids: [annotation.id] }),
+    );
+    await act(async () => root.render(<App annotations={[]} />));
+    expect(texts(hover())).toEqual(["Original sentence.", "翻译句子。"]);
+    expect(events.annotationHover).toHaveBeenLastCalledWith(null);
+  },
+);

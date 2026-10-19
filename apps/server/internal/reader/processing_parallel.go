@@ -15,6 +15,12 @@ func mergeProcessing(current, update Processing) Processing {
 	if update.lane != "" {
 		current.Translating = &ProcessingStage{Status: update.Status, Detail: update.Detail, Warning: update.Warning}
 		current.TranslationsDone, current.TranslationsTotal = update.TranslationsDone, update.TranslationsTotal
+		if update.LayoutRevision != "" {
+			current.LayoutRevision = update.LayoutRevision
+		}
+		if update.Status == "complete" {
+			current.Retranslating = false
+		}
 	} else {
 		if stage := current.Translating; stage != nil {
 			if (update.resetStages && (stage.Status == "failed" || stage.Status == "waiting")) || (update.wakeStages && stage.Status == "waiting") || (update.recoverStages && stage.Status == "running") {
@@ -72,6 +78,12 @@ func (s *Server) processTranslation(ctx context.Context, p *Processing) error {
 	work.lane, work.Phase, work.Status = "translating", "translating", "running"
 	work.Warning = ""
 	runErr := s.Store.saveProcessing(work)
+	if runErr == nil && work.Retranslating {
+		runErr = s.refreshRetranslationLayout(ctx, &work)
+		if runErr == nil {
+			m, runErr = s.readTranslationSource(work.DocumentID)
+		}
+	}
 	if runErr == nil {
 		runErr = s.translateContent(ctx, &work, m)
 	}
@@ -83,7 +95,7 @@ func (s *Server) processTranslation(ctx context.Context, p *Processing) error {
 		work.Status, work.Detail = "complete", "已完成"
 	}
 	s.processingMu.Lock()
-	if ctx.Err() == nil && work.Status != "waiting" {
+	if runErr == nil && ctx.Err() == nil && work.Status != "waiting" {
 		items, readErr := s.translations(work.DocumentID, m)
 		if readErr == nil {
 			for _, item := range items {

@@ -1,4 +1,5 @@
 import { app, autoUpdater, BrowserWindow, dialog, net, shell } from "electron";
+import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { canUpdateInPlace, stageUpdate } from "./mac-squirrel";
@@ -7,7 +8,8 @@ import {
   type ReleaseUpdate,
   type UpdateState,
 } from "./updates";
-import { downloadUpdate } from "./update-download";
+import { downloadUpdate, type DownloadProgress } from "./update-download";
+import type { UpdateProgress } from "../../../packages/reader-core/src/update-progress";
 
 export async function startUpdateService(window: BrowserWindow) {
   const directory = app.getPath("userData");
@@ -44,7 +46,55 @@ export async function startUpdateService(window: BrowserWindow) {
   let stopped = false;
   let wantsFeedback = false;
   let staged: string | undefined;
+  let installer: string | undefined;
+  // NSIS kills whatever still runs from the install folder, so the installer
+  // starts only after the reading flush and server shutdown have finished.
+  const runInstaller = () => {
+    if (!installer) return;
+    try {
+      // --updated keeps shortcuts and user data; --force-run reopens Reader.
+      spawn(installer, ["--updated", "/S", "--force-run"], {
+        detached: true,
+        stdio: "ignore",
+      })
+        .on("error", (error) =>
+          console.warn("Reader installer:", error.message),
+        )
+        .unref();
+    } catch (error) {
+      console.warn(
+        "Reader installer:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  };
   const alive = () => !stopped && !window.isDestroyed();
+  // Mirrors visible update work in the taskbar or Dock and the in-app toast.
+  const report = (progress: UpdateProgress | null) => {
+    if (window.isDestroyed()) return;
+    window.setProgressBar(
+      !progress
+        ? -1
+        : progress.phase === "download" && progress.total
+          ? // A mismatched Content-Length must not overflow the bar.
+            Math.min(1, progress.received / progress.total)
+          : 2,
+    );
+    window.webContents.send("reader:update-progress", progress);
+  };
+  // Reports whole-percent steps (or 1 MB steps without a size) while visible.
+  const track = (version: string): DownloadProgress => {
+    let last = -1;
+    return (received, total) => {
+      if (!wantsFeedback) return;
+      const step = total
+        ? Math.floor((received / total) * 100)
+        : Math.floor(received / (1024 * 1024));
+      if (step === last) return;
+      last = step;
+      report({ version, phase: "download", received, total });
+    };
+  };
   const request = (url: string, init: RequestInit) => net.fetch(url, init);
   const offerRestart = async (version: string) => {
     const selected = await dialog.showMessageBox(window, {
@@ -69,14 +119,17 @@ export async function startUpdateService(window: BrowserWindow) {
     try {
       const bundle = join(app.getPath("exe"), "..", "..", "..");
       if (!(await canUpdateInPlace(bundle))) return false;
-      if (wantsFeedback) window.setProgressBar(2);
+      // A manual check during a silent download reveals its progress.
       const archive = await downloadUpdate(
         { ...update, ...update.archive },
         join(directory, "updates"),
         request,
+        track(update.version),
       );
       try {
         if (!alive()) return true;
+        if (wantsFeedback)
+          report({ version: update.version, phase: "prepare", received: 0 });
         await stageUpdate(autoUpdater, archive);
         staged = update.version;
       } finally {
@@ -90,7 +143,7 @@ export async function startUpdateService(window: BrowserWindow) {
       );
       return false;
     } finally {
-      if (!window.isDestroyed()) window.setProgressBar(-1);
+      report(null);
     }
     if (alive()) await offerRestart(update.version);
     return true;
@@ -141,35 +194,66 @@ export async function startUpdateService(window: BrowserWindow) {
         const selected = await dialog.showMessageBox(window, {
           type: "info",
           message: `Reader ${result.update.version} 可用`,
-          detail: windows
-            ? `当前版本：${app.getVersion()}。下载并校验后将运行安装程序，Reader 会先保存阅读数据并退出。`
-            : `当前版本：${app.getVersion()}。下载并校验后将打开 DMG，请将 Reader 拖入 Applications 完成更新。安装前请退出当前 Reader。`,
+          detail: `${
+            windows
+              ? `当前版本：${app.getVersion()}。下载并校验后，Reader 会保存阅读数据并退出，自动安装后重新打开。`
+              : `当前版本：${app.getVersion()}。下载并校验后将打开 DMG，请将 Reader 拖入 Applications 完成更新。安装前请退出当前 Reader。`
+          }\n\n安装包从 GitHub 下载，速度较慢时可开启代理加速。`,
           buttons: [windows ? "下载并安装" : "下载安装包", "稍后"],
           defaultId: 0,
           cancelId: 1,
         });
         if (selected.response !== 0 || !alive()) return;
         downloading = true;
-        window.setProgressBar(2);
+        // The user asked for this download, so its progress is shown.
+        wantsFeedback = true;
         const path = await downloadUpdate(
           result.update,
           join(directory, "updates"),
           request,
+          track(result.update.version),
         );
         if (!alive()) return;
+        if (windows) {
+          // A cancelled quit leaves the installer armed for the next quit.
+          if (!installer) app.once("quit", runInstaller);
+          installer = path;
+          app.quit();
+          return;
+        }
         const error = await shell.openPath(path);
         if (error) throw new Error(`无法打开安装包：${error}`);
-        // NSIS replaces files in place; the running app must exit first.
-        if (windows) app.quit();
       } catch (error) {
+        // Clear the progress before the error dialog so it does not linger.
+        report(null);
         if (alive()) {
-          if (wantsFeedback || downloading)
-            await dialog.showMessageBox(window, {
+          if (wantsFeedback || downloading) {
+            const selected = await dialog.showMessageBox(window, {
               type: "error",
               message: "无法完成更新",
               detail: error instanceof Error ? error.message : String(error),
+              ...(!downloading && {
+                buttons: ["打开发布页", "关闭"],
+                defaultId: 1,
+                cancelId: 1,
+              }),
             });
-          else
+            if (!downloading && selected.response === 0 && alive()) {
+              try {
+                await shell.openExternal(
+                  "https://github.com/cynicalight/reader/releases/latest",
+                );
+              } catch {
+                if (alive())
+                  await dialog.showMessageBox(window, {
+                    type: "error",
+                    message: "无法打开发布页",
+                    detail:
+                      "请在浏览器中访问 https://github.com/cynicalight/reader/releases/latest",
+                  });
+              }
+            }
+          } else
             console.warn(
               "Reader update:",
               error instanceof Error ? error.message : String(error),
@@ -177,7 +261,7 @@ export async function startUpdateService(window: BrowserWindow) {
         }
       }
     })().finally(() => {
-      if (!window.isDestroyed()) window.setProgressBar(-1);
+      report(null);
       active = undefined;
     });
     return active;

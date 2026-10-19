@@ -24,6 +24,13 @@ import (
 
 const ConnectorPort = "17841"
 const connectorExtensionOrigin = "chrome-extension://afojfnpkeokahhniipldpdpecaljdnbe"
+const connectorStoreExtensionOrigin = "chrome-extension://dfhdcomjdkaiajiibbkonbonjlnkdjlg"
+
+// The development build pins its ID with a manifest key; the Chrome Web Store
+// build cannot carry that key and is assigned its own ID.
+func connectorOriginAllowed(origin string) bool {
+	return origin == connectorExtensionOrigin || origin == connectorStoreExtensionOrigin
+}
 
 func (s *Server) SetConnectorAvailable(available bool) {
 	s.connectorAvailable = available
@@ -77,14 +84,14 @@ func (s *Server) ConnectorHandler() http.Handler {
 	mux.HandleFunc("GET /v1/folders", s.connectorFolders)
 	mux.HandleFunc("GET /v1/labels", s.connectorLabels)
 	mux.HandleFunc("POST /v1/import", s.connectorImport)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.diagnosticHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, port, err := net.SplitHostPort(r.Host)
 		if err != nil || host != "127.0.0.1" || port != ConnectorPort {
 			fail(w, 403, "invalid host")
 			return
 		}
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin != connectorExtensionOrigin {
+		if origin != "" && !connectorOriginAllowed(origin) {
 			fail(w, 403, "invalid origin")
 			return
 		}
@@ -113,7 +120,7 @@ func (s *Server) ConnectorHandler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
-	})
+	}))
 }
 func (s *Server) connectorSession(w http.ResponseWriter, r *http.Request) {
 	s.connectorMu.Lock()
@@ -210,7 +217,7 @@ func (s *Server) paperLabels() ([]string, []string, error) {
 	return folders, tags, nil
 }
 func (s *Server) connectorImport(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes+(11<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		fail(w, 400, "上传超过限制或内容无效")
 		return
@@ -293,11 +300,19 @@ func (s *Server) connectorImport(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "无法检查 PDF")
 		return
 	}
-	if existing, lookupErr := s.Store.Document(hex.EncodeToString(hash.Sum(nil))[:32]); lookupErr == nil && existing.Library != "papers" {
-		fail(w, 409, "相同 PDF 已在图书库，请先移到论文库")
+	library := r.FormValue("library")
+	if library == "" {
+		library = "papers"
+	}
+	if !validLibrary(library) {
+		fail(w, 400, "未知书库")
 		return
 	}
-	d, status, err := s.importFile(r.Context(), temp.Name(), "paper.pdf", "papers", r.FormValue("allowLarge") == "1")
+	if existing, lookupErr := s.Store.Document(hex.EncodeToString(hash.Sum(nil))[:32]); lookupErr == nil && existing.Library != library {
+		fail(w, 409, "相同 PDF 已在另一个书库，请先在 Reader 中移动")
+		return
+	}
+	d, status, err := s.importFile(r.Context(), temp.Name(), "paper.pdf", library, r.FormValue("allowLarge") == "1")
 	if err != nil {
 		var imp importError
 		if errors.As(err, &imp) {
@@ -307,8 +322,8 @@ func (s *Server) connectorImport(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if d.Library != "papers" {
-		fail(w, 409, "相同 PDF 已在图书库，请先移到论文库")
+	if d.Library != library {
+		fail(w, 409, "相同 PDF 已在另一个书库，请先在 Reader 中移动")
 		return
 	}
 	d, err = s.applyFound(d.ID, found, title, "connector", "")

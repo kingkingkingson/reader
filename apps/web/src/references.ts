@@ -6,6 +6,7 @@ import type {
 } from "@reader/core";
 
 export interface ReferenceCard {
+  sourceId?: string;
   id: string;
   text: string;
   preview: string;
@@ -37,14 +38,15 @@ export function referenceCards(
 ): ReferenceCard[] {
   const refs = message.references || [];
   if (refs.length)
-    return refs.map((ref, index) =>
-      card(
+    return refs.map((ref, index) => ({
+      ...card(
         ref.text,
         index,
-        `${referenceLabel(ref.location, toc)}${ref.kind === "section" ? "" : " · 重点句"}`,
+        `${ref.sourceId ? `[${ref.sourceId}] · ` : ""}${referenceLabel(ref.location, toc)}${ref.kind === "section" ? "" : " · 重点句"}`,
         ref.location,
       ),
-    );
+      sourceId: ref.sourceId,
+    }));
   // Older conversations stored only the raw context. Keep excerpts searchable;
   // never assign today's reading position to historical text.
   const parts: string[] = [];

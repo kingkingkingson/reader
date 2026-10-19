@@ -136,7 +136,85 @@ export const glyphs = {
     f.p.line(x - 3.5, y - 0.5, x, y - 4, color, 1.5);
     f.p.line(x + 3.5, y - 0.5, x, y - 4, color, 1.5);
   }) as Glyph,
+  /** An arrow pointing up and right, as on links that jump elsewhere. */
+  external: ((f, x, y, color) => {
+    f.p.line(x - 3, y + 3, x + 3, y - 3, color, 1.3);
+    f.p.line(x - 1, y - 3, x + 3, y - 3, color, 1.3);
+    f.p.line(x + 3, y - 3, x + 3, y + 1, color, 1.3);
+  }) as Glyph,
+  edit: ((f, x, y, color) => {
+    f.p.line(x - 3.5, y + 3.5, x + 3, y - 3, color, 1.4);
+    f.p.line(x - 4, y + 4, x - 2, y + 4, color, 1.2);
+  }) as Glyph,
+  terminal: ((f, x, y, color) => {
+    f.p.box(
+      { x: x - 5.5, y: y - 4.5, w: 11, h: 9 },
+      { stroke: color, radius: 1.5, line: 1.2 },
+    );
+    f.p.line(x - 3, y - 1.5, x - 1, y, color, 1.2);
+    f.p.line(x - 1, y, x - 3, y + 1.5, color, 1.2);
+  }) as Glyph,
+  type: ((f, x, y, color) => {
+    f.p.line(x - 4.5, y - 4, x + 4.5, y - 4, color, 1.4);
+    f.p.line(x, y - 4, x, y + 4.5, color, 1.4);
+  }) as Glyph,
 };
+
+/** A right-pointing chevron, as on a collapsed disclosure. */
+export function chevronRight(f: Frame, x: number, y: number, color: string) {
+  f.p.line(x - 2, y - 4, x + 2, y, color, 1.4);
+  f.p.line(x + 2, y, x - 2, y + 4, color, 1.4);
+}
+
+export function checkbox(
+  f: Frame,
+  x: number,
+  y: number,
+  checked: boolean,
+  disabled = false,
+) {
+  const { p, c } = f;
+  const r = { x: x - 6.5, y: y - 6.5, w: 13, h: 13 };
+  p.alpha(disabled ? 0.45 : 1, () => {
+    if (checked) {
+      p.box(r, { fill: c.primary, radius: 3.5 });
+      p.check(x, y, 8, c.primaryForeground);
+    } else p.box(r, { fill: c.background, stroke: c.input, radius: 3.5 });
+  });
+}
+
+/** A slider; `value` runs from 0 to 1. */
+export function slider(
+  f: Frame,
+  x: number,
+  y: number,
+  w: number,
+  value: number,
+) {
+  const { p, c } = f;
+  p.box({ x, y: y - 2, w, h: 4 }, { fill: c.muted, radius: 2 });
+  p.box({ x, y: y - 2, w: w * value, h: 4 }, { fill: c.primary, radius: 2 });
+  p.circle(x + w * value, y, 6.5, c.background, c.ring);
+}
+
+/** A notification in the bottom-right corner. */
+export function toast(
+  f: Frame,
+  label: string,
+  appear: number,
+  state: "loading" | "success" = "success",
+) {
+  const { p, c, t } = f;
+  const w = p.measure(label, 11.5, 500) + 52;
+  const r = { x: 640 - w - 18, y: 400 - 48 - 16, w, h: 44 };
+  p.alpha(appear, () => {
+    p.box(r, { fill: c.popover, radius: 8, shadow: 14, stroke: c.border });
+    if (state === "loading")
+      p.spinner(r.x + 20, r.y + 22, 5, t, c.mutedForeground);
+    else p.checkCircle(r.x + 20, r.y + 22, 12, c.success);
+    p.text(label, r.x + 36, r.y + 22, { size: 11.5, weight: 500 });
+  });
+}
 
 export function sparkle(
   f: Frame,

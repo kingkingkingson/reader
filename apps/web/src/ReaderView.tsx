@@ -61,6 +61,9 @@ export function ReaderView({
         blockFocus: (block) => {
           if (!disposed) latest.current.events.blockFocus?.(block);
         },
+        annotationHover: (target) => {
+          if (!disposed) latest.current.events.annotationHover?.(target);
+        },
         annotation: (target) => {
           if (!disposed) latest.current.events.annotation?.(target);
         },
@@ -134,7 +137,11 @@ export function ReaderView({
     adapter.current?.setBlocks?.(blocks);
   }, [blocks]);
   return (
-    <div className="reader-stage" data-theme={theme.mode}>
+    <div
+      className="reader-stage"
+      data-theme={theme.mode}
+      data-dark-contrast={theme.pdfDarkContrast ?? "soft"}
+    >
       <div className="reader-host" ref={host} />
       {loading && (
         <div className="reader-loading">

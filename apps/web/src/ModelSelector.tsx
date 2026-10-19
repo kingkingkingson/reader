@@ -120,6 +120,9 @@ export function ModelSelector({
   const current = configuredModel
     ? selectedAgentModel(models, configuredModel)
     : selectedAgentModel(usable, "");
+  const effortInfo = current?.effortInfo;
+  const fixedEffort =
+    effortInfo?.mode === "fixed" || effortInfo?.mode === "unknown";
   const currentEffort =
     config?.efforts?.[provider]?.[configuredModel] ?? "medium";
   const effort = draftEffort ?? currentEffort;
@@ -239,7 +242,7 @@ export function ModelSelector({
           {current?.name ?? (loading ? "加载模型…" : "选择模型")}
         </span>
         <span className="model-trigger-effort">
-          {effortLabel(currentEffort)}
+          {fixedEffort ? "固定／自动" : effortLabel(currentEffort)}
         </span>
       </PopoverTrigger>
       <PopoverContent
@@ -251,7 +254,7 @@ export function ModelSelector({
         <div className="effort-heading">
           <Zap size={16} className="effort-symbol" aria-hidden="true" />
           <PopoverTitle className="effort-title" aria-live="polite">
-            {effortLabel(effort)}
+            {fixedEffort ? "固定／自动" : effortLabel(effort)}
           </PopoverTitle>
           <Button
             variant="ghost"
@@ -260,7 +263,10 @@ export function ModelSelector({
             aria-label="恢复默认 Effort"
             title="恢复默认 Effort（Medium）"
             disabled={
-              disabled || (saving && !effortSaving) || effort === "medium"
+              disabled ||
+              fixedEffort ||
+              (saving && !effortSaving) ||
+              effort === "medium"
             }
             onClick={() => {
               setAnimateEffort(true);
@@ -316,6 +322,16 @@ export function ModelSelector({
             </SelectContent>
           </Select>
         </div>
+        {effortInfo && (
+          <p className="text-xs text-muted-foreground" role="status">
+            {effortInfo.note}
+            {!fixedEffort &&
+            effortInfo.mappings?.[effort] &&
+            effortInfo.mappings[effort] !== effort
+              ? ` ${effort} → ${effortInfo.mappings[effort]}${effortInfo.mode === "budget" ? " tokens" : ""}`
+              : ""}
+          </p>
+        )}
         <div className="effort-slider-wrap">
           <Slider
             className="effort-slider"
@@ -323,7 +339,7 @@ export function ModelSelector({
             max={3}
             step={1}
             value={[efforts.indexOf(effort)]}
-            disabled={disabled || (saving && !effortSaving)}
+            disabled={disabled || fixedEffort || (saving && !effortSaving)}
             data-instant={!animateEffort || undefined}
             style={
               {
@@ -359,7 +375,12 @@ export function catalogRevision(config: AIConfig | null | undefined) {
     .filter(([key]) => key.startsWith("api:"))
     .map(([key, value]) => `${key}@${value.checkedAt}`)
     .sort();
-  return [config.api.url, ...(config.apiModels ?? []), ...checks].join("\n");
+  return [
+    config.api.url,
+    config.api.protocol ?? "auto",
+    ...(config.apiModels ?? []),
+    ...checks,
+  ].join("\n");
 }
 
 /** API models are offered only for tasks whose checks they passed. */

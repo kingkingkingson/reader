@@ -66,7 +66,7 @@ export function MergeDialog({
   };
   return (
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>合并 {group.length} 个版本</DialogTitle>
           <DialogDescription>
@@ -77,19 +77,22 @@ export function MergeDialog({
           value={master}
           onValueChange={(value) => setMaster(value as string)}
           aria-label="保留的版本"
-          className="gap-1"
+          className="min-w-0 grid-cols-[minmax(0,1fr)] gap-1"
         >
           {group.map((doc) => (
             <label key={doc.id} className="paper-merge-option">
               <RadioGroupItem value={doc.id} className="mt-0.5" />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">
+                <span
+                  className="block truncate text-sm font-medium"
+                  title={doc.title}
+                >
                   {doc.title}
                 </span>
                 <span className="block truncate text-xs text-muted-foreground">
                   {paperByline(doc) || "无论文信息"}
                 </span>
-                <span className="block text-xs text-muted-foreground">
+                <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">
                   {[
                     sizeLabel(doc.size),
                     `添加于 ${new Date(doc.createdAt).toLocaleDateString("zh-CN")}`,

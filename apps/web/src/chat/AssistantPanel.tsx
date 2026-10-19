@@ -1,15 +1,17 @@
 import { lazy, Suspense, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDown, LoaderCircle } from "lucide-react";
+import { ArrowDown, BookOpen, LoaderCircle } from "lucide-react";
 import { ProviderGlyph } from "../ProviderIdentity";
 import type { Message } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
 import { ScrollArea } from "@reader/ui/components/scroll-area";
 import {
   ChatSession,
+  chatRetryAction,
   type ChatSnapshot,
   type PendingAnswer,
 } from "./chat-session";
 import { AnswerActions } from "./AnswerActions";
+import { Thinking } from "./Thinking";
 const MessageMarkdown = lazy(() =>
   import("./MessageMarkdown").then((module) => ({
     default: module.MessageMarkdown,
@@ -45,6 +47,7 @@ export function chatRows(state: ChatSnapshot): ChatRow[] {
           role: "user",
           content: pending.input.prompt,
           context: pending.input.context,
+          readingLocation: pending.input.readingLocation,
           references: pending.input.references,
           attachments: pending.input.attachments,
           createdAt: "",
@@ -59,15 +62,22 @@ export function AssistantPanel({
   empty,
   extras,
   references,
+  onRegenerate,
+  regenerateDisabled = false,
+  renderAnswer = (_message, content) => content,
 }: {
   session: ChatSession;
   empty: ReactNode;
   extras: (message: Message) => ReactNode;
   references: (message: Message) => ReactNode;
+  onRegenerate: () => void;
+  regenerateDisabled?: boolean;
+  renderAnswer?: (message: Message, content: ReactNode) => ReactNode;
 }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const scroll = useChatScroll(state.pending?.key);
   const pending = state.pending;
+  const retryAction = chatRetryAction(state);
   return (
     <div className="chat-thread">
       <ScrollArea className="chat-scroll" viewportRef={scroll.viewportRef}>
@@ -78,11 +88,29 @@ export function AssistantPanel({
           {!state.messages.length && !pending && state.loaded && empty}
           {chatRows(state).map(({ key, message, pending: answer }) => {
             const assistant = answer || message?.role === "assistant",
-              content = answer?.content ?? message?.content ?? "";
-            const waiting = answer?.phase === "generating" && !content;
+              content = answer
+                ? answer.content + (answer.draft || "")
+                : (message?.content ?? "");
+            const reasoning = answer?.reasoning ?? message?.reasoning ?? "";
+            const waiting =
+              answer?.phase === "generating" &&
+              !content &&
+              (!reasoning || !!answer.activity);
             const timestamp = message?.createdAt
               ? new Date(message.createdAt)
               : undefined;
+            const markdown = (
+              <Suspense
+                fallback={
+                  <div style={{ whiteSpace: "pre-wrap" }}>{content}</div>
+                }
+              >
+                <MessageMarkdown
+                  content={content}
+                  generating={answer?.phase === "generating"}
+                />
+              </Suspense>
+            );
             return (
               <div
                 key={key}
@@ -95,11 +123,16 @@ export function AssistantPanel({
                     role="status"
                     aria-label={answer.notice ? undefined : "正在等待回答"}
                   >
-                    <span className="chat-waiting-icon" aria-hidden="true">
-                      {answer.fallback ||
-                      !["codex", "claude", "kimi", "api"].includes(
-                        answer.input.provider,
-                      ) ? (
+                    <span
+                      className={`chat-waiting-icon${answer.activity ? " chat-waiting-icon--activity" : ""}`}
+                      aria-hidden="true"
+                    >
+                      {answer.activity ? (
+                        <BookOpen size={16} strokeWidth={1.5} />
+                      ) : answer.fallback ||
+                        !["codex", "claude", "kimi", "api"].includes(
+                          answer.input.provider,
+                        ) ? (
                         <LoaderCircle size={16} />
                       ) : (
                         <ProviderGlyph
@@ -109,21 +142,30 @@ export function AssistantPanel({
                       )}
                     </span>
                     {answer.notice && (
-                      <span className="chat-status">{answer.notice}</span>
+                      <span className="chat-status" title={answer.notice}>
+                        {answer.notice}
+                      </span>
                     )}
                   </div>
                 )}
-                {assistant ? (
-                  <Suspense
-                    fallback={
-                      <div style={{ whiteSpace: "pre-wrap" }}>{content}</div>
+                {assistant && reasoning && (
+                  <Thinking
+                    text={reasoning}
+                    active={answer?.phase === "generating" && !content}
+                    incomplete={
+                      !!answer &&
+                      ["incomplete", "unconfirmed", "cancelled"].includes(
+                        answer.phase,
+                      )
                     }
-                  >
-                    <MessageMarkdown
-                      content={content}
-                      generating={answer?.phase === "generating"}
-                    />
-                  </Suspense>
+                  />
+                )}
+                {assistant ? (
+                  message ? (
+                    renderAnswer(message, markdown)
+                  ) : (
+                    markdown
+                  )
                 ) : (
                   <>
                     {message && references(message)}
@@ -145,15 +187,27 @@ export function AssistantPanel({
               </div>
             );
           })}
-          {(state.loadError ||
-            (pending && !["generating", "saved"].includes(pending.phase))) && (
+          {retryAction && (
             <Button
               variant="ghost"
               size="sm"
-              disabled={state.busy}
-              onClick={() => void session.retry()}
+              disabled={
+                state.busy ||
+                (retryAction === "regenerate" && regenerateDisabled)
+              }
+              onClick={() =>
+                retryAction === "regenerate"
+                  ? onRegenerate()
+                  : void session.retrySync()
+              }
             >
-              重试同步
+              {
+                {
+                  reload: "重新加载",
+                  sync: "恢复回答",
+                  regenerate: "重新生成",
+                }[retryAction]
+              }
             </Button>
           )}
         </div>

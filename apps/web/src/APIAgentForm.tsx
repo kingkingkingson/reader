@@ -3,9 +3,21 @@ import type { APIConnection } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
 import { Input } from "@reader/ui/components/input";
 
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@reader/ui/components/select";
+const protocols = {
+  auto: "中转站的非官方api默认使用openai协议",
+  openai: "OpenAI Chat Completions",
+  anthropic: "Anthropic Messages",
+} as const;
 const DEFAULT_API_URL = "https://api.deepseek.com";
 
-/** Endpoint and key of the OpenAI-compatible "api" agent. A saved key is
+/** Endpoint, protocol and key of the "api" agent. A saved key is
  * never sent back; leaving the field empty keeps it. */
 export function APIAgentForm({
   connection,
@@ -17,10 +29,20 @@ export function APIAgentForm({
   onSave: (connection: APIConnection) => Promise<void>;
 }) {
   const [url, setURL] = useState(connection.url || DEFAULT_API_URL);
+  const [protocol, setProtocol] = useState<
+    NonNullable<APIConnection["protocol"]>
+  >(connection.protocol ?? "auto");
+  useEffect(
+    () => setProtocol(connection.protocol ?? "auto"),
+    [connection.protocol],
+  );
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   useEffect(() => setURL(connection.url || DEFAULT_API_URL), [connection.url]);
-  const changed = url.trim() !== connection.url || key.trim() !== "";
+  const changed =
+    url.trim() !== connection.url ||
+    key.trim() !== "" ||
+    protocol !== (connection.protocol ?? "auto");
   const save = async () => {
     setSaving(true);
     try {
@@ -30,6 +52,7 @@ export function APIAgentForm({
         endpoint
           ? {
               url: endpoint,
+              protocol,
               model: "",
               key: key.trim() || undefined,
               hasKey: key.trim() ? false : connection.hasKey,
@@ -57,6 +80,22 @@ export function APIAgentForm({
         disabled={disabled || saving}
         onChange={(event) => setURL(event.target.value)}
       />
+      <Select
+        value={protocol}
+        disabled={disabled || saving}
+        onValueChange={(value) => value && setProtocol(value)}
+      >
+        <SelectTrigger aria-label="API 协议">
+          <SelectValue>{protocols[protocol]}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {Object.entries(protocols).map(([value, label]) => (
+            <SelectItem key={value} value={value}>
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <div className="flex gap-2">
         <Input
           aria-label="API Key"

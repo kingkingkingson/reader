@@ -184,7 +184,7 @@ func TestAutomaticModelFallsBackToCLIDefault(t *testing.T) {
 				calls = append(calls, cli.model)
 				efforts = append(efforts, req.Input.Effort)
 				if cli.model == "" {
-					return GenerateResult{"ok", "stop"}, nil
+					return GenerateResult{Text: "ok", FinishReason: "stop"}, nil
 				}
 				if tt.partial {
 					_ = emit(ProviderEvent{Text: "部分"})

@@ -9,7 +9,9 @@ import {
   Check,
   ChartColumn,
   ArrowRightLeft,
+  FileDown,
 } from "lucide-react";
+import { exportAnnotatedPDFWithToast } from "./annotated-pdf-export";
 import type { Document, LibraryMode, Processing } from "@reader/core";
 import { api } from "@reader/api";
 import { toast } from "sonner";
@@ -24,6 +26,11 @@ import {
 } from "@reader/ui/components/context-menu";
 import { DocumentBadges } from "./DocumentManagement";
 import { ProcessingUsageDialog } from "./ProcessingUsage";
+import {
+  CoverOverview,
+  DocumentOverviewDialog,
+  useOverviewJobs,
+} from "./DocumentOverview";
 import { CoverProcessing } from "./ProcessingStatus";
 import { toggleDocumentSelection, trashWithUndo } from "./library-actions";
 
@@ -52,6 +59,10 @@ export function LibraryDocuments({
   editing?: boolean;
   onEditingChange?: (editing: boolean) => void;
 }) {
+  const [overviewDocument, setOverviewDocument] = useState<Document | null>(
+    null,
+  );
+  const overviewJobs = useOverviewJobs();
   const [usageDocument, setUsageDocument] = useState<Document | null>(null);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState(false);
@@ -237,7 +248,29 @@ export function LibraryDocuments({
                   </div>
                   <div className="cover-decoration" />
                 </Button>
-                {doc.type === "pdf" &&
+                {overviewJobs.some(
+                  (o) =>
+                    o.documentId === doc.id &&
+                    (!["complete", "canceled"].includes(o.status) ||
+                      !jobs.some(
+                        (j) =>
+                          j.documentId === doc.id &&
+                          (j.incomplete ||
+                            j.status === "failed" ||
+                            j.status === "waiting"),
+                      )),
+                ) &&
+                !jobs.some(
+                  (j) =>
+                    j.documentId === doc.id &&
+                    (j.status === "running" || j.status === "queued"),
+                ) ? (
+                  <CoverOverview
+                    job={overviewJobs.find((o) => o.documentId === doc.id)!}
+                    onOpen={() => setOverviewDocument(doc)}
+                  />
+                ) : (
+                  doc.type === "pdf" &&
                   (jobs.find((job) => job.documentId === doc.id) ? (
                     <CoverProcessing
                       job={jobs.find((job) => job.documentId === doc.id)!}
@@ -258,7 +291,8 @@ export function LibraryDocuments({
                     >
                       分析文档
                     </Button>
-                  ))}
+                  ))
+                )}
               </div>
               <div className="book-meta">
                 <Button
@@ -327,6 +361,10 @@ export function LibraryDocuments({
               </p>
             </ContextMenuTrigger>
             <ContextMenuContent>
+              <ContextMenuItem onClick={() => setOverviewDocument(doc)}>
+                <BookOpen />
+                文档概要
+              </ContextMenuItem>
               <ContextMenuItem onClick={() => setUsageDocument(doc)}>
                 <ChartColumn />
                 用量统计
@@ -335,6 +373,14 @@ export function LibraryDocuments({
                 <Pencil />
                 编辑文档信息
               </ContextMenuItem>
+              {doc.type === "pdf" && (
+                <ContextMenuItem
+                  onClick={() => void exportAnnotatedPDFWithToast(doc)}
+                >
+                  <FileDown />
+                  导出带批注的 PDF
+                </ContextMenuItem>
+              )}
               {onMove && (doc.type === "pdf" || doc.library === "papers") && (
                 <ContextMenuItem
                   onClick={() =>
@@ -363,6 +409,11 @@ export function LibraryDocuments({
           </ContextMenu>
         ))}
       </div>
+      <DocumentOverviewDialog
+        key={overviewDocument?.id}
+        document={overviewDocument}
+        onClose={() => setOverviewDocument(null)}
+      />
       <ProcessingUsageDialog
         document={usageDocument}
         job={jobs.find((job) => job.documentId === usageDocument?.id)}

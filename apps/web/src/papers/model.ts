@@ -3,11 +3,19 @@ import type {
   PaperColumn,
   PaperLibraryPreferences,
   SmartCategory,
+  TagBoard,
   PaperSort,
   Processing,
   ReadingStatus,
 } from "@reader/core";
-import { paperCreators, creatorName, paperYear } from "./format";
+import { matchTagBoard } from "../library";
+import {
+  paperCreators,
+  creatorName,
+  paperYear,
+  publicationDate,
+  wasOpened,
+} from "./format";
 
 export type BuiltinView =
   | "all"
@@ -57,6 +65,9 @@ export const sortLabels: Record<PaperSort, string> = {
   opened: "最近打开",
   added: "最近添加",
   year: "年份",
+  published: "发表日期",
+  progress: "阅读进度",
+  size: "文件大小",
   title: "标题",
   author: "作者",
   venue: "出处",
@@ -64,25 +75,51 @@ export const sortLabels: Record<PaperSort, string> = {
   notes: "批注数",
 };
 export const columnLabels: Record<PaperColumn, string> = {
+  tags: "标签",
   authors: "作者",
   year: "年份",
+  published: "发表日期",
   venue: "出处",
+  progress: "阅读进度",
+  doi: "DOI",
+  arxiv: "arXiv 编号",
+  size: "文件大小",
   added: "添加时间",
   opened: "上次打开",
   notes: "批注",
   status: "状态",
 };
+export const defaultColumnWidths: Record<PaperColumn, number> = {
+  authors: 160,
+  year: 64,
+  published: 112,
+  tags: 160,
+  progress: 96,
+  doi: 180,
+  arxiv: 132,
+  size: 96,
+  venue: 150,
+  added: 112,
+  opened: 112,
+  notes: 96,
+  status: 72,
+};
+
 export const defaultColumns: PaperColumn[] = [
+  "tags",
   "authors",
   "year",
   "venue",
   "status",
 ];
 /** The sort a column header applies. */
-export const columnSort: Record<PaperColumn | "title", PaperSort> = {
+export const columnSort: Partial<Record<PaperColumn | "title", PaperSort>> = {
   title: "title",
   authors: "author",
   year: "year",
+  published: "published",
+  progress: "progress",
+  size: "size",
   venue: "venue",
   added: "added",
   opened: "opened",
@@ -94,6 +131,9 @@ export const descendingSorts: ReadonlySet<PaperSort> = new Set([
   "opened",
   "added",
   "year",
+  "published",
+  "progress",
+  "size",
   "notes",
 ]);
 /** Show or hide a column, keeping the canonical column order. */
@@ -216,12 +256,30 @@ const byText =
 /** Natural order per key: newest, most annotated or A–Z first. */
 export function sortPapers(docs: Document[], sort: PaperSort, reverse = false) {
   const title = byText((d) => d.title);
-  const by: Record<PaperSort, (a: Document, b: Document) => number> = {
-    opened: (a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt),
-    added: (a, b) => b.createdAt.localeCompare(a.createdAt),
-    year: (a, b) =>
-      (b.metadata.date || "").localeCompare(a.metadata.date || "") ||
-      title(a, b),
+  const numeric: Partial<
+    Record<PaperSort, (doc: Document) => number | undefined>
+  > = {
+    opened: (d) => (wasOpened(d) ? Date.parse(d.lastOpenedAt) : undefined),
+    added: (d) => Date.parse(d.createdAt),
+    year: (d) => publicationDate(d.metadata.date)?.year,
+    published: (d) => publicationDate(d.metadata.date)?.key,
+    progress: (d) => d.percentage,
+    size: (d) => (d.size > 0 ? d.size : undefined),
+  };
+  const numberKey = numeric[sort];
+  const tie = (a: Document, b: Document) =>
+    title(a, b) || a.id.localeCompare(b.id);
+  if (numberKey)
+    return [...docs].sort((a, b) => {
+      const x = numberKey(a),
+        y = numberKey(b);
+      const hasX = x !== undefined && Number.isFinite(x);
+      const hasY = y !== undefined && Number.isFinite(y);
+      // Missing values stay last, independently of direction.
+      if (!hasX || !hasY) return Number(hasY) - Number(hasX) || tie(a, b);
+      return (reverse ? x - y : y - x) || tie(a, b);
+    });
+  const by: Partial<Record<PaperSort, (a: Document, b: Document) => number>> = {
     title,
     author: (a, b) => byText(firstAuthor)(a, b) || title(a, b),
     venue: (a, b) => byText((d) => d.metadata.venue || "")(a, b) || title(a, b),
@@ -232,8 +290,11 @@ export function sortPapers(docs: Document[], sort: PaperSort, reverse = false) {
       b.noteCount + b.highlightCount - (a.noteCount + a.highlightCount) ||
       title(a, b),
   };
-  const compare = by[sort] || by.opened;
-  return [...docs].sort((a, b) => (reverse ? -compare(a, b) : compare(a, b)));
+  const compare = by[sort] || title;
+  return [...docs].sort(
+    (a, b) =>
+      (reverse ? -compare(a, b) : compare(a, b)) || a.id.localeCompare(b.id),
+  );
 }
 
 /**
@@ -246,7 +307,11 @@ export function filterPapers(
   query: string,
   sort: PaperSort,
   jobs: Map<string, Processing>,
-  options: ViewContext & { notDuplicates?: string[]; reverse?: boolean } = {},
+  options: ViewContext & {
+    notDuplicates?: string[];
+    reverse?: boolean;
+    tagFilter?: Pick<TagBoard, "tags" | "match">;
+  } = {},
 ) {
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const found = (doc: Document) => {
@@ -254,13 +319,18 @@ export function filterPapers(
     const text = searchText(doc);
     return terms.every((term) => text.includes(term));
   };
-  if (view === "duplicates")
-    return duplicateGroups(docs, options.notDuplicates).flat().filter(found);
-  return sortPapers(
-    docs.filter((doc) => matchesView(doc, view, jobs, options) && found(doc)),
-    sort,
-    options.reverse,
-  );
+  const matching =
+    view === "duplicates"
+      ? duplicateGroups(docs, options.notDuplicates).flat().filter(found)
+      : docs.filter(
+          (doc) => matchesView(doc, view, jobs, options) && found(doc),
+        );
+  const tagged = options.tagFilter
+    ? matchTagBoard(matching, options.tagFilter)
+    : matching;
+  return view === "duplicates"
+    ? tagged
+    : sortPapers(tagged, sort, options.reverse);
 }
 
 const comparableTitle = (title: string) =>
@@ -557,12 +627,8 @@ export function setHidden(
 /** Recently opened papers, newest first, excluding pinned ones. */
 export function recentPapers(docs: Document[], pinned: string[], limit = 10) {
   return docs
-    .filter(
-      (doc) =>
-        Date.parse(doc.lastOpenedAt) - Date.parse(doc.createdAt) > 1000 &&
-        !pinned.includes(`doc:${doc.id}`),
-    )
-    .sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt))
+    .filter((doc) => wasOpened(doc) && !pinned.includes(`doc:${doc.id}`))
+    .sort((a, b) => Date.parse(b.lastOpenedAt) - Date.parse(a.lastOpenedAt))
     .slice(0, limit);
 }
 

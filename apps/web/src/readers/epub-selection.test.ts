@@ -433,7 +433,7 @@ it.each(["highlight", "underline", "note"] as const)(
   },
 );
 
-it("restores each translated source slice and maps decoration clicks to the saved annotation", async () => {
+it("retains explicit source focus but does not paint translated annotations on the original", async () => {
   const source = adapter.getSelection()!.location;
   if (source.type !== "epub") throw Error("expected EPUB");
   const loc = JSON.parse(source.locator!);
@@ -478,29 +478,7 @@ it("restores each translated source slice and maps decoration clicks to the save
     },
   ]);
   const decorations = bridge.apply.mock.calls.at(-1)![0] as Decoration[];
-  expect(decorations.map((d) => d.locator.text?.highlight)).toEqual([
-    "Selected",
-    "passage",
-  ]);
-  expect(decorations.map((d) => d.id)).toEqual([
-    "translated-note:0",
-    "translated-note:1",
-  ]);
-  expect(decorations[1].locator.serialize().locations).not.toHaveProperty(
-    "sourceSlice",
-  );
-  adapter.clearSelection();
-  pointer("pointerdown");
-  pointer("pointerup");
-  bridge.observer!.onDecorationActivated!({
-    decoration: decorations[1],
-    group: "annotations",
-    rect: { top: 100, left: 40, width: 180, height: 20 },
-    point: { x: 210, y: 110 },
-  });
-  expect(activated).toHaveBeenLastCalledWith(
-    expect.objectContaining({ ids: ["translated-note"] }),
-  );
+  expect(decorations).toEqual([]);
   await adapter.highlight([]);
   expect(bridge.apply).toHaveBeenLastCalledWith([], "annotations");
 });

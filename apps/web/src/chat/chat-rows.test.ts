@@ -8,11 +8,11 @@ it("keeps local user/answer row identity during persistence replacement and the 
     phase: "syncing",
     notice: "",
     fallback: "",
-    before: new Set(),
     input: {
       provider: "codex",
       prompt: "question",
       context: "",
+      readingLocation: { type: "pdf", page: 5 },
       references: [],
       attachments: [],
     },
@@ -30,6 +30,10 @@ it("keeps local user/answer row identity during persistence replacement and the 
     "request-1-user",
     "request-1",
   ]);
+  expect(chatRows(state)[0].message?.readingLocation).toEqual({
+    type: "pdf",
+    page: 5,
+  });
   state.messages = [
     {
       id: "u",
@@ -54,7 +58,7 @@ it("keeps local user/answer row identity during persistence replacement and the 
     "request-1-user",
     "request-1",
   ]);
-  state.pending = { ...pending, key: "request-2", before: new Set(["u", "a"]) };
+  state.pending = { ...pending, key: "request-2" };
   expect(chatRows(state).map((row) => row.key)).toEqual([
     "request-1-user",
     "request-1",

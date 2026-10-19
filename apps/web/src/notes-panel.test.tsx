@@ -62,6 +62,7 @@ const annotations = [
     kind: "note",
     quote: "a claim",
     note: "Check this",
+    tags: ["existing-tag"],
     location: {
       type: "pdf",
       page: 1,
@@ -168,18 +169,13 @@ it("edits a note in place", async () => {
   await act(async () => button("编辑批注").click());
   const field = host.querySelector<HTMLTextAreaElement>('[aria-label="批注"]')!;
   await act(async () => type(field, "Checked twice"));
-  const tags = host.querySelector<HTMLInputElement>('[aria-label="标签"]')!;
-  Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value",
-  )!.set!.call(tags, "#method, proof method");
-  await act(async () =>
-    tags.dispatchEvent(new Event("input", { bubbles: true })),
-  );
+  expect(host.querySelector('[aria-label="标签"]')).toBeNull();
+  expect(host.querySelector('[aria-label="按标签筛选"]')).toBeNull();
+  expect(host.textContent).not.toContain("existing-tag");
   await act(async () => button("保存").click());
   expect(handlers.onSave).toHaveBeenCalledWith(annotations[3], {
     note: "Checked twice",
-    tags: ["method", "proof"],
+    tags: ["existing-tag"],
   });
   expect(host.querySelector('[aria-label="批注"]')).toBeNull();
 });

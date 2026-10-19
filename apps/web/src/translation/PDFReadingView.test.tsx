@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, useEffect } from "react";
+import { ReadingLinkNavigation } from "../reading-links";
+import { act, useContext, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
@@ -47,7 +48,32 @@ vi.mock("@reader/api", () => ({
   blockImageURL: () => "",
 }));
 vi.mock("../chat/MessageMarkdown", () => ({
-  MessageMarkdown: ({ content }: { content: string }) => <p>{content}</p>,
+  MessageMarkdown: ({
+    content,
+    citationBlockId,
+  }: {
+    content: string;
+    citationBlockId?: string;
+  }) => {
+    const navigate = useContext(ReadingLinkNavigation);
+    return (
+      <p>
+        {content === "如图三" ? (
+          <a
+            href="#figure"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate?.(citationBlockId!, "figure:3");
+            }}
+          >
+            {content}
+          </a>
+        ) : (
+          content
+        )}
+      </p>
+    );
+  },
 }));
 const adapter = {
   open: vi.fn(async () => {}),
@@ -65,6 +91,7 @@ const adapter = {
   destroy: vi.fn(async () => {}),
   focusBlock: vi.fn(async () => {}),
   adjustZoom: vi.fn(),
+  flashReference: vi.fn(),
   cancelBlockFocus: vi.fn(),
   followBlock: vi.fn(async () => {}),
   focusSentences: vi.fn(async () => {}),
@@ -120,10 +147,12 @@ async function renderView(
   theme: ReaderTheme = defaultTheme,
   extraBlocks: PDFBlock[] = [],
   searchResults: SearchResult[] = [],
+  sidebarsOpen = { left: true, right: true },
 ) {
   await act(async () =>
     root.render(
       <PDFReadingView
+        sidebarsOpen={sidebarsOpen}
         document={{ id: "doc", type: "pdf" } as Document}
         theme={theme}
         annotations={[]}
@@ -197,7 +226,7 @@ async function click(label: string) {
     });
   }
 }
-it("switches modes without recreating the PDF and links an original selection to its sentence", async () => {
+it("switches modes without recreating the PDF or marking the opposite selection", async () => {
   await click("原文译文");
   expect(adapter.focusBlock).not.toHaveBeenCalled();
   await act(async () =>
@@ -211,7 +240,7 @@ it("switches modes without recreating the PDF and links an original selection to
     }),
   );
   const marked = host.querySelector('[data-sentence="1"]');
-  expect(marked?.hasAttribute("data-linked")).toBe(true);
+  expect(marked?.hasAttribute("data-linked")).toBe(false);
   expect(
     host.querySelector('[data-sentence="0"]')?.hasAttribute("data-linked"),
   ).toBe(false);
@@ -223,7 +252,7 @@ it("switches modes without recreating the PDF and links an original selection to
   expect(host.querySelector(".translation-document")).toBeNull();
   expect(adapter.destroy).not.toHaveBeenCalled();
 });
-it("keeps the translated selection as the quote and anchors its counterpart to original text", async () => {
+it("keeps the translated selection and navigation metadata without marking the original", async () => {
   const highlights = new Map<string, Set<Range>>();
   vi.stubGlobal("CSS", { highlights });
   vi.stubGlobal(
@@ -270,10 +299,22 @@ it("keeps the translated selection as the quote and anchors its counterpart to o
       }),
     }),
   );
-  expect(adapter.focusSentences).toHaveBeenLastCalledWith(
+  expect(adapter.focusSentences).not.toHaveBeenCalledWith(
     "p1-b1",
     ["Second sentence."],
     true,
+  );
+  const selected = fixture.ready!.getSelection()!;
+  expect(selected.location.sentenceLink).toBeUndefined();
+  const prepared = await fixture.ready!.prepareAnnotation!(selected);
+  expect(prepared.location.translation).toEqual(selected.location.translation);
+  expect(prepared.location.sentenceLink).toBeUndefined();
+  await click("取消同步效果");
+  vi.mocked(adapter.focusBlock!).mockClear();
+  await act(async () => fixture.ready!.focusLocation!(prepared.location));
+  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
+    "p1-b1",
+    "parallel",
   );
   await act(async () => fixture.ready!.clearSelection());
   expect(events.selection).toHaveBeenLastCalledWith(null);
@@ -499,9 +540,19 @@ it("focuses the paragraph containing a saved annotation like clicking it", async
   expect(adapter.goTo).not.toHaveBeenCalled();
 });
 
-it("always follows scrolling in either pane without an unlink control", async () => {
+it("can disable automatic original centering while reading the translation", async () => {
   await click("原文译文");
-  expect(host.querySelector('[aria-label="同步滚动"]')).toBeNull();
+  vi.mocked(adapter.focusBlock!).mockClear();
+  const centerButton = host.querySelector<HTMLButtonElement>(
+    '[aria-label="取消同步效果"]',
+  )!;
+  expect(centerButton.getAttribute("aria-pressed")).toBe("true");
+  await act(async () => centerButton.click());
+  expect(
+    host
+      .querySelector('[aria-label="开启同步效果"]')
+      ?.getAttribute("aria-pressed"),
+  ).toBe("false");
   const pane = host.querySelector<HTMLElement>(".translation-document")!;
   const block = pane.querySelector<HTMLElement>("[data-translation-block]")!;
   pane.getBoundingClientRect = () => new DOMRect(0, 0, 600, 600);
@@ -509,10 +560,21 @@ it("always follows scrolling in either pane without an unlink control", async ()
   await act(async () =>
     fixture.events!.readingAnchor?.({ blockId: "p1-b1", fraction: 0.5 }),
   );
-  expect(pane.scrollTop).toBe(-20);
+  expect(pane.scrollTop).toBe(0);
   expect(host.querySelector("[data-focused]")).toBeNull();
   await act(async () => {
     pane.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 100 }));
+    pane.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await new Promise(requestAnimationFrame);
+  });
+  expect(adapter.followBlock).not.toHaveBeenCalled();
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="开启同步效果"]')!
+      .click();
+  });
+  await act(async () => {
+    pane.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: 20 }));
     pane.dispatchEvent(new Event("scroll", { bubbles: true }));
     await new Promise(requestAnimationFrame);
   });
@@ -520,6 +582,20 @@ it("always follows scrolling in either pane without an unlink control", async ()
     blockId: "p1-b1",
     fraction: 0.55,
   });
+  await act(async () => {
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="取消同步效果"]')!
+      .click();
+  });
+  const translatedBlock = host.querySelector<HTMLElement>(
+    "[data-translation-block]",
+  )!;
+  await act(async () => {
+    translatedBlock.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  });
+  expect(adapter.focusBlock).toHaveBeenLastCalledWith("p1-b1", "parallel");
 });
 
 function translationGeometry(height = 200) {
@@ -863,3 +939,300 @@ it.each(["mode", "wheel"])(
     }
   },
 );
+
+it("disables source following and smoothly resynchronizes from the source when enabled", async () => {
+  await click("原文译文");
+  const { pane } = translationGeometry();
+  await click("取消同步效果");
+  await act(async () =>
+    fixture.events!.readingAnchor?.({ blockId: "p1-b1", fraction: 0.5 }),
+  );
+  expect(pane.scrollTop).toBe(0);
+  vi.useFakeTimers();
+  try {
+    await click("开启同步效果");
+    expect(pane.scrollTop).toBe(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(96);
+    });
+    expect(pane.scrollTop).toBeGreaterThan(0);
+    expect(pane.scrollTop).toBeLessThan(400);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    expect(pane.scrollTop).toBe(400);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("disables translation following and resynchronizes from the last manually scrolled translation", async () => {
+  await click("原文译文");
+  const { pane } = translationGeometry();
+  await click("取消同步效果");
+  vi.mocked(adapter.followBlock!).mockClear();
+  vi.useFakeTimers();
+  try {
+    await act(async () => {
+      pane.dispatchEvent(
+        new WheelEvent("wheel", { bubbles: true, deltaY: 100 }),
+      );
+      pane.scrollTop = 400;
+      pane.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await vi.advanceTimersByTimeAsync(32);
+    });
+    expect(adapter.followBlock).not.toHaveBeenCalled();
+    await click("开启同步效果");
+    expect(adapter.followBlock).toHaveBeenLastCalledWith({
+      blockId: "p1-b1",
+      fraction: 0.5,
+    });
+    expect(pane.scrollTop).toBe(400);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(["仅原文", "原文译文"])(
+  "keeps annotation and search focus available with sync disabled in %s",
+  async (mode) => {
+    if (mode === "原文译文") await click(mode);
+    await click("取消同步效果");
+    vi.mocked(adapter.focusBlock!).mockClear();
+    await act(async () => {
+      void fixture.ready!.focusLocation?.({
+        type: "pdf",
+        page: 1,
+        x: 0.1,
+        y: 0.2,
+      });
+    });
+    expect(adapter.focusBlock).toHaveBeenLastCalledWith(
+      "p1-b1",
+      mode === "仅原文" ? "source" : "parallel",
+    );
+    expect(
+      host
+        .querySelector('[aria-label="开启同步效果"]')
+        ?.getAttribute("aria-pressed"),
+    ).toBe("false");
+  },
+);
+
+it("focuses the image from a translated figure reference even with sync disabled", async () => {
+  fixture.translations[0].sentences[0].target = "如图三";
+  await renderView(defaultTheme, [
+    {
+      id: "figure-3",
+      page: 2,
+      label: "image",
+      text: "",
+      caption: "Figure 3. Result",
+      image: "figure.png",
+      bounds: { x: 0.1, y: 0.1, width: 0.5, height: 0.3 },
+    },
+  ]);
+  await click("原文译文");
+  await click("取消同步效果");
+  vi.mocked(adapter.focusBlock!).mockClear();
+  await act(async () =>
+    host.querySelector<HTMLAnchorElement>('a[href="#figure"]')!.click(),
+  );
+  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
+    "figure-3",
+    "parallel",
+  );
+  expect(adapter.goTo).not.toHaveBeenCalled();
+});
+
+it("paints search and annotation jump feedback after focusing the source", async () => {
+  const location = {
+    type: "pdf" as const,
+    page: 1,
+    x: 0.1,
+    y: 0.2,
+    quote: "target",
+  };
+  vi.mocked(adapter.flashReference!).mockClear();
+  await act(async () => {
+    await fixture.ready!.focusLocation?.(location);
+  });
+  expect(adapter.flashReference).toHaveBeenCalledWith(location, "target");
+});
+
+it("paints a jump target on an unparsed page after page navigation", async () => {
+  const location = { type: "pdf" as const, page: 2, quote: "unparsed target" };
+  vi.mocked(adapter.flashReference!).mockClear();
+  await act(async () => {
+    await fixture.ready!.focusLocation?.(location);
+  });
+  expect(adapter.goTo).toHaveBeenCalledWith(location);
+  expect(adapter.flashReference).toHaveBeenCalledWith(
+    location,
+    "unparsed target",
+  );
+});
+
+it.each(["left", "right"] as const)(
+  "refocuses the viewport center once after the %s sidebar closes",
+  async (closed) => {
+    await click("原文译文");
+    vi.mocked(adapter.focusBlock!).mockClear();
+    const extra: PDFBlock[] = [
+      {
+        id: "p1-center",
+        page: 1,
+        label: "text",
+        text: "Center",
+        bounds: { x: 0.1, y: 0.55, width: 0.3, height: 0.1 },
+      },
+    ];
+    await renderView(defaultTheme, extra);
+    // A stale reading anchor must not win over the actual viewport center.
+    await act(async () =>
+      fixture.events!.readingAnchor?.({ blockId: "p1-b1", fraction: 0.5 }),
+    );
+    const source = document.createElement("div");
+    source.className = "pdf-container";
+    source.innerHTML = '<div class="page" data-page-number="1"></div>';
+    host.querySelector(".translation-source")!.append(source);
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 300, 600, 600),
+    );
+    vi.spyOn(
+      source.firstElementChild!,
+      "getBoundingClientRect",
+    ).mockReturnValue(new DOMRect(0, 0, 600, 1000));
+    vi.useFakeTimers();
+    try {
+      host.setAttribute("data-toggling", "");
+      await renderView(defaultTheme, extra, [], {
+        left: closed !== "left",
+        right: closed !== "right",
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(adapter.focusBlock).not.toHaveBeenCalled();
+      host.removeAttribute("data-toggling");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
+        "p1-center",
+        "parallel",
+      );
+      await renderView(defaultTheme, extra);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(adapter.focusBlock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each(["wheel", "mode", "reopen"])(
+  "cancels sidebar refocus after %s",
+  async (action) => {
+    await act(async () =>
+      fixture.events!.readingAnchor?.({ blockId: "p1-b1", fraction: 0.5 }),
+    );
+    const source = document.createElement("div");
+    source.className = "pdf-container";
+    source.innerHTML = '<div class="page" data-page-number="1"></div>';
+    host.querySelector(".translation-source")!.append(source);
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 600, 600),
+    );
+    vi.spyOn(
+      source.firstElementChild!,
+      "getBoundingClientRect",
+    ).mockReturnValue(new DOMRect(0, 0, 600, 1000));
+    vi.useFakeTimers();
+    try {
+      await renderView(defaultTheme, [], [], { left: false, right: true });
+      if (action === "wheel")
+        await act(async () =>
+          host
+            .querySelector(".translation-source")!
+            .dispatchEvent(
+              new WheelEvent("wheel", { bubbles: true, deltaY: 50 }),
+            ),
+        );
+      if (action === "mode") await click("仅译文");
+      if (action === "reopen") await renderView();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(adapter.focusBlock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it.each(["left", "right"] as const)(
+  "keeps an unparsed page in place when the %s sidebar closes",
+  async (closed) => {
+    await act(async () =>
+      fixture.events!.readingAnchor?.({ blockId: "p1-b1", fraction: 0.5 }),
+    );
+    const source = document.createElement("div");
+    source.className = "pdf-container";
+    source.innerHTML =
+      '<div class="page" data-page-number="1"></div><div class="page" data-page-number="2"></div>';
+    host.querySelector(".translation-source")!.append(source);
+    vi.spyOn(source, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 600, 600),
+    );
+    vi.spyOn(
+      source.firstElementChild!,
+      "getBoundingClientRect",
+    ).mockReturnValue(new DOMRect(0, -1000, 600, 1000));
+    vi.mocked(adapter.focusBlock!).mockClear();
+    vi.mocked(adapter.goTo).mockClear();
+    vi.useFakeTimers();
+    try {
+      await renderView(defaultTheme, [], [], {
+        left: closed !== "left",
+        right: closed !== "right",
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(adapter.focusBlock).not.toHaveBeenCalled();
+      expect(adapter.goTo).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("strips legacy cross-side links when preparing a mark without losing its position", async () => {
+  const location = {
+    type: "pdf" as const,
+    page: 1,
+    rects: [{ x: 0.1, y: 0.25, width: 0.2, height: 0.02 }],
+    sentenceLink: { origin: "source" as const, parts: [] },
+  };
+  const prepared = await fixture.ready!.prepareAnnotation!({
+    text: "Second",
+    location,
+  });
+  expect(prepared.location.sentenceLink).toBeUndefined();
+  expect(prepared.location).toEqual({
+    type: "pdf",
+    page: 1,
+    rects: location.rects,
+  });
+  await click("原文译文");
+  await click("取消同步效果");
+  vi.mocked(adapter.focusBlock!).mockClear();
+  await act(async () => fixture.ready!.focusLocation!(prepared.location));
+  expect(adapter.focusBlock).toHaveBeenCalledExactlyOnceWith(
+    "p1-b1",
+    "parallel",
+  );
+});

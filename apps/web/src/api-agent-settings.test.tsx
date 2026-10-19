@@ -2,7 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { AIConfig, AgentModel } from "@reader/core";
+import type { AIConfig, AgentModel, ProxySettingsState } from "@reader/core";
 import { api } from "@reader/api";
 import { toast } from "sonner";
 import { Settings } from "./Settings";
@@ -11,6 +11,12 @@ import { useReaderStore } from "./store";
 vi.mock("@reader/api", () => ({
   api: {
     connectorStatus: vi.fn(async () => ({ available: true })),
+    journalRankConfig: vi.fn(async () => ({
+      enabled: true,
+      hasKey: false,
+      selected: [],
+      available: [],
+    })),
     providers: vi.fn(),
     aiConfig: vi.fn(),
     saveAIConfig: vi.fn(),
@@ -64,6 +70,7 @@ const openAPI = async () =>
   );
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("PointerEvent", MouseEvent);
   vi.clearAllMocks();
   config = {
     primary: "api",
@@ -126,7 +133,48 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  delete window.readerDesktop;
   vi.unstubAllGlobals();
+});
+
+it("groups proxy settings and log export under diagnostics without a network tab", async () => {
+  const exportLogs = vi.fn(async () => true);
+  window.readerDesktop = {
+    platform: "darwin",
+    proxySettings: vi.fn(async (): Promise<ProxySettingsState> => ({
+      settings: { mode: "manual", host: "127.0.0.1", port: 7890 },
+      restartRequired: false,
+    })),
+    saveProxySettings: vi.fn(),
+    checkProxy: vi.fn(),
+    restart: vi.fn(),
+    exportDiagnostics: exportLogs,
+    checkForUpdates: vi.fn(),
+    writeClipboardText: vi.fn(),
+    setAppearance: vi.fn(),
+    importFiles: vi.fn(),
+    importLargePapers: vi.fn(),
+    showDocumentFile: vi.fn(),
+    openDocumentFile: vi.fn(),
+    openExternal: vi.fn(),
+    onBeforeClose: vi.fn(),
+    onLibraryChanged: vi.fn(),
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  const tabs = Array.from(
+    host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  );
+  expect(tabs.map((tab) => tab.textContent)).not.toContain("网络");
+  const diagnostics = tabs.find((tab) => tab.textContent === "诊断")!;
+  await act(async () => diagnostics.click());
+  const panel = input("代理地址").closest('[role="tabpanel"]')!;
+  expect(panel.getAttribute("aria-labelledby")).toBe(diagnostics.id);
+  expect(panel.textContent).toContain("chatgpt.com/robots.txt");
+  const exportButton = Array.from(
+    panel.querySelectorAll<HTMLButtonElement>("button"),
+  ).find((button) => button.textContent === "导出全部日志")!;
+  await act(async () => exportButton.click());
+  expect(exportLogs).toHaveBeenCalledOnce();
 });
 it("saves the API endpoint and key, then tests the new connection", async () => {
   await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
@@ -142,6 +190,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com",
+        protocol: "auto",
         model: "",
         key: "sk-test",
         hasKey: false,
@@ -152,6 +201,7 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
   for (const model of ["deepseek-flash", "deepseek-v4-pro"])
     for (const stage of ["text", "vision"])
       expect(api.testAI).toHaveBeenCalledWith("api", stage, model);
+  expect(api.testAI).toHaveBeenCalledTimes(4);
   expect(
     host.querySelectorAll('.api-model-list [aria-label="图片理解：已通过"]'),
   ).toHaveLength(1);
@@ -168,7 +218,18 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
   const card = host.querySelector('[aria-label="配置 API Key"]')!;
   expect(card.querySelector('[aria-label="文本推理：已通过"]')).not.toBeNull();
   expect(card.querySelector('[aria-label="图片理解：已通过"]')).not.toBeNull();
+});
+it("keeps the saved key when changing only the API endpoint and rechecks models", async () => {
+  config.api = { url: "https://api.deepseek.com", model: "", hasKey: true };
+  config.capabilities = {
+    "api:deepseek-flash": { text: true, vision: true, checkedAt: "saved" },
+    "api:deepseek-v4-pro": { text: true, vision: false, checkedAt: "saved" },
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
   await openAPI();
+  expect(input("API Key").value).toBe("");
+  expect(input("API Key").placeholder).toBe("已保存，留空保持不变");
+  expect(api.testAI).not.toHaveBeenCalled();
   // Editing only the address keeps the saved key without resending it.
   await type("API 地址", "https://api.deepseek.com/v1");
   await submit();
@@ -176,13 +237,26 @@ it("saves the API endpoint and key, then tests the new connection", async () => 
     expect.objectContaining({
       api: {
         url: "https://api.deepseek.com/v1",
+        protocol: "auto",
         model: "",
         key: undefined,
         hasKey: true,
       },
     }),
   );
-  expect(api.testAI).toHaveBeenCalledTimes(8);
+  for (const model of ["deepseek-flash", "deepseek-v4-pro"])
+    for (const stage of ["text", "vision"])
+      expect(api.testAI).toHaveBeenCalledWith("api", stage, model);
+  expect(api.testAI).toHaveBeenCalledTimes(4);
+  expect(config.api).toEqual({
+    url: "https://api.deepseek.com/v1",
+    protocol: "auto",
+    model: "",
+    hasKey: true,
+  });
+  expect(
+    host.querySelectorAll('.api-model-list [aria-label="图片理解：已通过"]'),
+  ).toHaveLength(1);
 });
 it("warns when no listed model passes the vision check", async () => {
   config.api = { url: "https://api.example.com", model: "", hasKey: true };
@@ -227,3 +301,137 @@ it("adds and removes a model ID by hand and checks it", async () => {
   expect(config.apiModels).toEqual([]);
   expect(host.textContent).not.toContain("my-model");
 });
+
+it("keeps selection auto-copy opt-in and lets reading settings toggle it", async () => {
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  const previous = useReaderStore.getState().theme;
+  useReaderStore.setState({
+    theme: { ...previous, autoCopySelection: undefined },
+  });
+  try {
+    await act(async () =>
+      root.render(<Settings open onOpenChange={() => {}} />),
+    );
+    const reading = [
+      ...host.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+    ].find((tab) => tab.textContent === "阅读")!;
+    await act(async () => reading.click());
+    const label = [...host.querySelectorAll("label")].find((node) =>
+      node.textContent?.includes("自动复制选中文字"),
+    )!;
+    const checkbox =
+      label.querySelector<HTMLButtonElement>('[role="checkbox"]')!;
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    await act(async () => checkbox.click());
+    expect(useReaderStore.getState().theme.autoCopySelection).toBe(true);
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    await act(async () => checkbox.click());
+    expect(useReaderStore.getState().theme.autoCopySelection).toBe(false);
+  } finally {
+    await act(async () => useReaderStore.setState({ theme: previous }));
+  }
+});
+
+it("does not expose automatic chapter context", async () => {
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  expect(host.querySelector('[aria-label="提问时附带本章原文"]')).toBeNull();
+});
+
+it("rechecks a saved API model with a per-stage wait limit without changing configuration", async () => {
+  config.api = { url: "https://api.example.com", model: "", hasKey: true };
+  listed = { "slow-model": true };
+  config.capabilities = {
+    "api:slow-model": {
+      text: false,
+      vision: false,
+      checkedAt: "saved",
+      error: "检测超时",
+    },
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  await openAPI();
+  const retry = () =>
+    host.querySelector<HTMLButtonElement>('[aria-label="重新检测 slow-model"]');
+  expect(retry()).not.toBeNull();
+  await type("检测等待上限（秒）", "120");
+  await act(async () => retry()!.click());
+  expect(api.testAI).toHaveBeenCalledWith("api", "text", "slow-model", 120);
+  expect(api.testAI).toHaveBeenCalledWith("api", "vision", "slow-model", 120);
+  expect(retry()).not.toBeNull();
+  await type("检测等待上限（秒）", "601");
+  expect(retry()!.disabled).toBe(true);
+  await type("检测等待上限（秒）", "0");
+  vi.mocked(api.testAI).mockClear();
+  await act(async () => retry()!.click());
+  expect(api.testAI).toHaveBeenCalledWith("api", "text", "slow-model");
+  expect(api.saveAIConfig).not.toHaveBeenCalled();
+});
+
+it("shows the latest first-output observations including zero, without inventing missing timings", async () => {
+  config.api = { url: "https://api.example.com", model: "", hasKey: true };
+  listed = { observed: true, old: false };
+  config.capabilities = {
+    "api:observed": {
+      text: true,
+      vision: true,
+      checkedAt: "saved",
+      textFirstOutputMs: 0,
+      visionFirstOutputMs: 1250,
+    },
+    "api:old": {
+      text: false,
+      vision: false,
+      checkedAt: "saved",
+      error: "连接失败",
+    },
+  };
+  await act(async () => root.render(<Settings open onOpenChange={() => {}} />));
+  await openAPI();
+  const rows = host.querySelectorAll(".api-model-list li");
+  expect(rows[0].textContent).toContain("文本首输出 0.00 s");
+  expect(rows[0].textContent).toContain("图片首输出 1.25 s");
+  expect(rows[1].textContent).not.toContain("首输出");
+  expect(rows[1].textContent).toContain("连接失败");
+});
+
+it.each(["text", "vision"] as const)(
+  "does not show stale observations after a %s request fails",
+  async (failedStage) => {
+    config.api = { url: "https://api.example.com", model: "", hasKey: true };
+    listed = { observed: true };
+    config.capabilities = {
+      "api:observed": {
+        text: true,
+        vision: true,
+        checkedAt: "saved",
+        textFirstOutputMs: 1234,
+        visionFirstOutputMs: 2345,
+      },
+    };
+    vi.mocked(api.testAI).mockImplementation(async (_provider, stage) => {
+      if (stage === failedStage) throw new Error("Failed to fetch");
+      return {
+        text: true,
+        vision: false,
+        checkedAt: "new",
+        pendingVision: true,
+        textFirstOutputMs: 100,
+      };
+    });
+    await act(async () =>
+      root.render(<Settings open onOpenChange={() => {}} />),
+    );
+    await openAPI();
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>('[aria-label="重新检测 observed"]')!
+        .click(),
+    );
+    const row = host.querySelector(".api-model-list li")!;
+    expect(row.textContent).toContain("Failed to fetch");
+    expect(row.textContent).not.toContain("1.23 s");
+    expect(row.textContent).not.toContain("2.35 s");
+    if (failedStage === "text") expect(row.textContent).not.toContain("首输出");
+    else expect(row.textContent).toContain("文本首输出 0.10 s");
+  },
+);

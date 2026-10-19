@@ -237,3 +237,29 @@ it("replaces a loaded layout crop with a display-sized render", async () => {
   });
   expect(renderImage).toHaveBeenCalledTimes(1);
 });
+
+it("replaces an old sharp image after a full layout reparse", async () => {
+  const renderImage = vi.fn(async () => "blob:old-sharp");
+  const draw = async (image: string) =>
+    act(async () =>
+      root.render(
+        <TranslationText
+          block={{ ...base, image }}
+          documentId="doc"
+          retry={() => {}}
+          renderImage={renderImage}
+        />,
+      ),
+    );
+  await draw("assets/p1-b1.png");
+  const old = host.querySelector("img")!;
+  Object.defineProperty(old, "naturalWidth", { value: 480 });
+  await act(async () => old.dispatchEvent(new Event("load")));
+  expect(old.getAttribute("src")).toBe("blob:old-sharp");
+  await draw("assets/0123456789abcdef0123456789abcdef_p1-b1.png");
+  const image = host.querySelector("img")!;
+  expect(image).not.toBe(old);
+  expect(image.getAttribute("src")).toContain(
+    "?v=assets%2F0123456789abcdef0123456789abcdef_p1-b1.png",
+  );
+});

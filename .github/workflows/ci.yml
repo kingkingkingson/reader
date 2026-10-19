@@ -40,3 +40,40 @@ jobs:
       - run: pnpm test:go
       - name: Test shared and macOS code
         run: pnpm exec vitest run --exclude "apps/desktop/main/windows-proxy*.test.ts"
+
+  windows-proxy:
+    # Windows proxy conversion tests — pure logic, no real Clash dependency.
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test Windows proxy conversion and reading
+        run: pnpm exec vitest run apps/desktop/main/windows-proxy.test.ts apps/desktop/main/windows-proxy-reader.test.ts
+
+  windows-command-line:
+    # The command-line installer edits the user PATH through PowerShell and the
+    # registry; only a Windows runner exercises that path.
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Test the Windows PATH installer
+        run: pnpm exec vitest run apps/desktop/main/command-line.windows.test.ts

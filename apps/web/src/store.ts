@@ -150,3 +150,23 @@ export async function openLinkTarget(target: ReaderLinkTarget) {
   if (state.active?.id !== doc.id) state.open(doc);
   return true;
 }
+
+// Cache only safe reproducibility settings in the shell, available after sidecar failure.
+useReaderStore.subscribe((state, previous) => {
+  if (
+    state.theme === previous.theme &&
+    state.aiConfig === previous.aiConfig &&
+    state.libraryPreferences === previous.libraryPreferences
+  )
+    return;
+  if (typeof window !== "undefined")
+    window.readerDesktop?.diagnosticSettings?.({
+      ...state.theme,
+      mode: state.libraryPreferences.mode,
+      primaryMode: state.libraryPreferences.primaryMode,
+      provider: state.aiConfig?.primary,
+      chatModel: state.aiConfig?.models[state.aiConfig.primary],
+      translationModel:
+        state.aiConfig?.translationModels?.[state.aiConfig.primary],
+    });
+});

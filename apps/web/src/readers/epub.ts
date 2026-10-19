@@ -1,3 +1,5 @@
+import { selectionContext } from "./selection-context";
+import { forwardReaderShortcut } from "../shortcuts/shortcuts";
 import {
   installEPUBPaging,
   installEPUBScroll,
@@ -314,6 +316,7 @@ export class EPUBReaderAdapter implements ReaderAdapter {
       changed();
     };
     const key = (event: KeyboardEvent) => {
+      forwardReaderShortcut(event);
       this.pointers.delete(wnd);
       this.onKeyDown(event);
     };
@@ -565,6 +568,10 @@ export class EPUBReaderAdapter implements ReaderAdapter {
         const location = this.fromLocator(exact);
         this.selectedWindow = frame?.contentWindow ?? undefined;
         this.selection = {
+          context: selectionContext(
+            selected.getRangeAt(0),
+            frame.contentDocument!.body,
+          ),
           text: selection.text,
           location,
           anchor: selectionAnchor(
@@ -741,21 +748,13 @@ export class EPUBReaderAdapter implements ReaderAdapter {
     const decorations = await Promise.all(
       annotations
         .filter(
-          (a) => a.location.type === "epub" && a.kind !== "bookmark" && a.quote,
+          (a) =>
+            a.location.type === "epub" &&
+            !a.location.translation &&
+            a.kind !== "bookmark" &&
+            a.quote,
         )
-        .flatMap((a) => {
-          const locations =
-            a.location.translation?.ranges?.flatMap((r) =>
-              r.location ? [r.location] : [],
-            ) ?? [];
-          return locations.length
-            ? locations.map((location, index) => ({
-                ...a,
-                location,
-                decorationId: `${a.id}:${index}`,
-              }))
-            : [{ ...a, decorationId: a.id }];
-        })
+        .map((a) => ({ ...a, decorationId: a.id }))
         .map(async (a): Promise<Decoration | undefined> => {
           try {
             const location = a.location as EPUBLocation;
@@ -827,16 +826,15 @@ export class EPUBReaderAdapter implements ReaderAdapter {
   }
   async getContext() {
     if (!this.doc || !this.location.href) return "";
-    const response = await fetch(
-      publicationURL(this.doc.id, this.location.href.split("#")[0]),
-    );
+    const href = this.location.href.split("#")[0];
+    const response = await fetch(publicationURL(this.doc.id, href));
     if (!response.ok) throw new Error("无法读取章节");
     const html = new DOMParser().parseFromString(
       await response.text(),
       "text/html",
     );
     html.querySelectorAll("style,script").forEach((el) => el.remove());
-    return html.body.textContent?.trim().slice(0, 24000) || "";
+    return (html.body.textContent?.trim() || "").slice(0, 24000);
   }
   async destroy() {
     if (this.disposed) return;

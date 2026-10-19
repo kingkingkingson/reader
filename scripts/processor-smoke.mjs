@@ -1,7 +1,14 @@
 // Runs inside the packaged processor directory with Electron's embedded Node.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -95,9 +102,77 @@ Socket.prototype.connect = denyNetwork;
   assert.ok(manifest.timings.every((page) => page.regions > 0));
   assert.ok(manifest.blocks.some((block) => block.text.length > 0));
   assert.ok((await readFile(join(output, "paper.md"), "utf8")).length > 0);
+  const corpus = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      pathToFileURL(guard).href,
+      join(base, "corpus.mjs"),
+      "--input",
+      join(base, "../web/samples/reading-notes.pdf"),
+      "--output",
+      join(temporary, "corpus.json"),
+      "--pages",
+      "1",
+    ],
+    {
+      cwd: temporary,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      encoding: "utf8",
+      timeout: 60000,
+    },
+  );
+  if (corpus.error) throw corpus.error;
+  assert.equal(corpus.status, 0, corpus.stderr);
+  const original = JSON.parse(
+    await readFile(join(temporary, "corpus.json"), "utf8"),
+  );
+  assert.equal(original.totalPages, pdf.numPages);
+  assert.deepEqual(
+    original.pages.map((page) => page.page),
+    [1],
+  );
+  assert.ok(
+    original.pages.some((page) => page.spans.some((span) => span.text.trim())),
+  );
+  const pageImages = join(temporary, "page-images");
+  await mkdir(pageImages);
+  const requestedPages = pdf.numPages > 1 ? [1, 2] : [1];
+  const rendered = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      pathToFileURL(guard).href,
+      join(base, "render-pages.mjs"),
+      "--input",
+      join(base, "../web/samples/reading-notes.pdf"),
+      "--output",
+      pageImages,
+      "--pages",
+      requestedPages.join(","),
+    ],
+    {
+      cwd: temporary,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      encoding: "utf8",
+      timeout: 60000,
+    },
+  );
+  if (rendered.error) throw rendered.error;
+  assert.equal(rendered.status, 0, rendered.stderr);
+  assert.deepEqual(
+    (await readdir(pageImages)).sort(),
+    requestedPages.map((page) => `page-${page}.png`),
+  );
+  for (const page of requestedPages) {
+    const bytes = await readFile(join(pageImages, `page-${page}.png`));
+    assert.equal(bytes.subarray(1, 4).toString(), "PNG");
+  }
   assert.deepEqual((await readdir(temporary)).sort(), [
+    "corpus.json",
     "offline.mjs",
     "output",
+    "page-images",
   ]);
   console.log(
     `Bundled layout model parsed ${manifest.pages} pages offline (${manifest.blocks.length} blocks).`,

@@ -1,3 +1,4 @@
+import { annotationsInRects, sentenceRectsAtPoint } from "./annotation-hover";
 import { useTranslations } from "./useTranslations";
 import {
   useEffect,
@@ -47,6 +48,7 @@ export function EPUBReadingView({
   processing,
 }: ComponentProps<typeof ReaderView> & {
   toolbarHost?: HTMLElement | null;
+  autoCenterHost?: HTMLElement | null;
   processing?: Processing;
   pageNavigation?: ReactNode;
 }) {
@@ -297,6 +299,7 @@ export function EPUBReadingView({
         .catch((e) => toast.error(e.message));
   };
   const scroll = () => {
+    live.current.events.annotationHover?.(null);
     cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = requestAnimationFrame(() => {
       if (

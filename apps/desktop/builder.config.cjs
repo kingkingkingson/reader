@@ -20,7 +20,10 @@ module.exports = {
     sign: (options) => require("./mac-sign.cjs")(options),
     hardenedRuntime: false,
     notarize: false,
-    artifactName: "Reader-${version}-mac-${arch}.${ext}",
+    artifactName:
+      process.arch === "x64"
+        ? "Reader-${version}-mac-intel-x64.${ext}"
+        : "Reader-${version}-mac-${arch}.${ext}",
   },
   dmg: {
     sign: false,

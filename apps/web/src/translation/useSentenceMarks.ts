@@ -1,3 +1,4 @@
+import { annotationsInRects } from "./annotation-hover";
 import { SentenceHover } from "./sentence-hover";
 import { useEffect, useId, useRef } from "react";
 import type { RefObject } from "react";
@@ -6,15 +7,12 @@ import type {
   PDFBlock,
   ReaderAdapter,
   ReaderEvents,
+  ReaderAnnotationTarget,
   SearchResult,
   TranslationBlock,
 } from "@reader/core";
 import { translatedAnnotationRanges } from "./annotations";
-import {
-  sourcePassage,
-  translatedSentenceRanges,
-  validParts,
-} from "./sentence-links";
+import { sourcePassage, translatedSentenceRanges } from "./sentence-links";
 import { searchRanges } from "./search-ranges";
 
 type Mark = { annotation: Annotation; range: Range };
@@ -29,7 +27,7 @@ const hit = (range: Range, x: number, y: number) =>
       y <= r.bottom,
   );
 
-/** Hover and saved cross-language marks share sentence geometry, never native selection. */
+/** Saved marks stay on their origin side; hover may still link sentences. */
 export function useSentenceMarks(
   root: RefObject<HTMLDivElement | null>,
   engine: ReaderAdapter | undefined,
@@ -103,6 +101,7 @@ export function useSentenceMarks(
     let leaveTimer: ReturnType<typeof setTimeout> | undefined;
     let anchor: { x: number; y: number } | undefined;
     let activeRanges: Range[] = [];
+    let activeAnnotationTarget: ReaderAnnotationTarget | null = null;
     const cancelEnter = () => {
       clearTimeout(enterTimer);
       enterTimer = undefined;
@@ -117,20 +116,24 @@ export function useSentenceMarks(
       leaveTimer = setTimeout(() => {
         leaveTimer = undefined;
         activeRanges = [];
+        activeAnnotationTarget = null;
         hover.clear();
       }, 500);
     };
     const clearHover = () => {
+      latest.current.events.annotationHover?.(null);
       pointer.current = undefined;
       cancelEnter();
       deferClear();
     };
     const interruptHover = () => {
+      latest.current.events.annotationHover?.(null);
       geometry = new WeakMap();
       pointer.current = undefined;
       cancelEnter();
       cancelLeave();
       activeRanges = [];
+      activeAnnotationTarget = null;
       hover.clear(true);
     };
     const targetCache = new Map<string, Range[]>();
@@ -152,29 +155,6 @@ export function useSentenceMarks(
       registry.delete(searchName);
       names = [];
       marks = translatedAnnotationRanges(host, annotations, translations);
-      if (linked)
-        for (const annotation of annotations) {
-          if (
-            annotation.kind === "bookmark" ||
-            annotation.location.type !== "pdf"
-          )
-            continue;
-          for (const part of validParts(
-            annotation.location.sentenceLink,
-            translations,
-          )) {
-            const t = translations.find((t) => t.blockId === part.blockId)!;
-            const ranges =
-              annotation.location.sentenceLink?.origin === "translation"
-                ? sourceRanges(t, part.sentenceIndex)
-                : translatedSentenceRanges(
-                    host,
-                    part.blockId,
-                    part.sentenceIndex,
-                  );
-            marks.push(...ranges.map((range) => ({ annotation, range })));
-          }
-        }
       const groups = new Map<string, Range[]>();
       const rules: string[] = [];
       for (const mark of marks) {
@@ -283,6 +263,28 @@ export function useSentenceMarks(
         deferClear();
         return;
       }
+      const report = (matches: Annotation[], rects: DOMRect[]) => {
+        activeAnnotationTarget =
+          matches.length && rects.length
+            ? {
+                ids: matches.map((a) => a.id),
+                anchor: {
+                  x: point.x,
+                  top: Math.min(...rects.map((r) => r.top)),
+                  bottom: Math.max(...rects.map((r) => r.bottom)),
+                },
+              }
+            : null;
+        latest.current.events.annotationHover?.(activeAnnotationTarget);
+      };
+      const pointRect = new DOMRect(point.x, point.y, 1, 1);
+      const direct = annotationsInRects(
+        host,
+        latest.current.annotations,
+        marks,
+        [pointRect],
+      );
+      if (direct.length) hover.clear(true);
       const translated = target.closest<HTMLElement>("[data-sentence]");
       let t: TranslationBlock | undefined,
         index = -1,
@@ -308,6 +310,7 @@ export function useSentenceMarks(
       } else {
         const page = target.closest<HTMLElement>(".page[data-page-number]");
         if (!page) {
+          report(direct, [pointRect]);
           deferClear();
           return;
         }
@@ -346,6 +349,7 @@ export function useSentenceMarks(
           );
       }
       if (!t || index < 0 || !t.sentences[index]) {
+        report(direct, [pointRect]);
         deferClear();
         return;
       }
@@ -357,7 +361,21 @@ export function useSentenceMarks(
       activeRanges = fromTranslation
         ? targetRanges(t.blockId, index)
         : sourceRanges(t, index);
-      hover.show(`${t.blockId}:${index}:${fromTranslation}`, ranges);
+      const rects = activeRanges.flatMap((range) =>
+        Array.from(range.getClientRects()),
+      );
+      const matches = annotationsInRects(
+        host,
+        latest.current.annotations,
+        marks,
+        rects,
+      );
+      report(
+        matches,
+        activeRanges.flatMap((range) => Array.from(range.getClientRects())),
+      );
+      if (matches.length) hover.clear(true);
+      else hover.show(`${t.blockId}:${index}:${fromTranslation}`, ranges);
     };
     const move = (event: PointerEvent) => {
       if (event.buttons || window.getSelection()?.toString().trim()) {
@@ -382,8 +400,10 @@ export function useSentenceMarks(
       ) {
         cancelEnter();
         cancelLeave();
+        latest.current.events.annotationHover?.(activeAnnotationTarget);
         return;
       }
+      latest.current.events.annotationHover?.(null);
       deferClear();
       // Tolerate hand jitter without postponing the dwell indefinitely.
       if (
@@ -476,6 +496,7 @@ export function useSentenceMarks(
       host.removeEventListener("click", click, true);
       host.removeEventListener("scroll", interruptHover, true);
       repaint.current = undefined;
+      latest.current.events.annotationHover?.(null);
       hover.destroy();
       names.forEach((name) => registry.delete(name));
       registry.delete(searchName);

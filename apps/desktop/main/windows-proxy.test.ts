@@ -98,6 +98,28 @@ describe("Windows system proxy", () => {
       `localhost,127.0.0.1,::1,${cidr},${range}`,
     );
   });
+
+  it("tolerates unsupported bypass rules without failing the proxy", () => {
+    const env = convert({
+      proxy: "127.0.0.1:7890",
+      bypass: "example.com;foo*bar;172.*.1.*;valid.org;999.*.*.1",
+    });
+    expect(env.HTTPS_PROXY).toBe("http://127.0.0.1:7890");
+    // Unsupported rules (foo*bar, 172.*.1.*, 999.*.*.1) are skipped
+    expect(env.NO_PROXY).toBe("localhost,127.0.0.1,::1,example.com,valid.org");
+  });
+
+  it("preserves <local> expansion behavior", () => {
+    const env = convert({
+      proxy: "localhost:7890",
+      bypass: "<local>;*.example.org",
+    });
+    const bypass = env.NO_PROXY!.split(",");
+    expect(bypass).toContain("localhost");
+    expect(bypass).toContain("reader-pc.office");
+    expect(bypass).toContain("reader-pc");
+    expect(bypass).toContain(".example.org");
+  });
   it("accepts <local> case-insensitively and deduplicates local hosts", () => {
     expect(
       convert({
@@ -116,9 +138,6 @@ describe("Windows system proxy", () => {
     { proxy: "https=http://proxy.example/path" },
     { proxy: "https=user:password@proxy.example" },
     { proxy: "https=proxy.example:99999" },
-    ...["*", "999.*", "010.*", "10.*.2.*", "10.*.*.*.*", "foo*bar"].map(
-      (bypass) => ({ proxy: "localhost:7890", bypass }),
-    ),
   ])("rejects unreadable or unsupported settings: %j", (raw) => {
     expect(() => convert(raw)).toThrow();
   });

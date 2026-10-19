@@ -51,6 +51,6 @@
 
 ## 提交前核对
 
-当前上传 ZIP 没有固定扩展 `key`，商店草稿因此取得了新的扩展 ID；当前 `apps/server/internal/reader/connector.go` 只接受旧的固定 ID `afojfnpkeokahhniipldpdpecaljdnbe`。若按这个组合发布，商店安装的扩展无法连接桌面版。先把商店 ID 与桌面版允许的来源对齐，并用商店安装包做一次连接、收录和重启验收，再提交审核。仓库已有单独的 `fix/connector-manifest` 工作树，不要在本资料提交中混入该分支的改动。
+上传 ZIP 不含固定扩展 `key`，商店分配的 ID 为 `dfhdcomjdkaiajiibbkonbonjlnkdjlg`；`apps/server/internal/reader/connector.go` 同时接受该 ID 与本地测试版 ID `afojfnpkeokahhniipldpdpecaljdnbe`。包含该来源的桌面版发布后，用商店安装包做一次连接、收录和重启验收。
 
 商店后台草稿中的 **Yes, I am using remote code** 与当前上传包不符，应改成 **No**。本资料不代替后台保存，Pages 地址也要等 `website/**` 推送并部署后才能使用。

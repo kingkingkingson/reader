@@ -1,8 +1,8 @@
 # Reader Connector（Chrome 首版）
 
-扩展位于 `apps/connector`。在仓库根目录运行 `pnpm --filter @reader/connector build`，然后打开 Chrome 的 `chrome://extensions`，开启开发者模式，点「加载已解压的扩展程序」并选择 `apps/connector/dist`。扩展仅在点击工具栏按钮后读取当前标签页；第一次收录时，Chrome 会询问网站访问权限，用于读取所选论文页面、PDF 和快照图片。
+扩展位于 `apps/connector`。本地测试时，在仓库根目录运行 `READER_CONNECTOR_DEV_KEY=1 pnpm --filter @reader/connector build`，然后打开 Chrome 的 `chrome://extensions`，开启开发者模式，点「加载已解压的扩展程序」并选择 `apps/connector/dist`。上传 Chrome 网上应用店时，不设置 `READER_CONNECTOR_DEV_KEY`，重新构建并把 `dist` 内的文件压缩到 ZIP 根目录；商店不接受带 `key` 的清单。扩展仅在点击工具栏按钮后读取当前标签页；第一次收录时，Chrome 会询问网站访问权限，用于读取所选论文页面、PDF 和快照图片。
 
-启动 Reader 桌面版后，点击扩展即可自动连接。Reader 的连接入口固定监听 `127.0.0.1:17841`，只接受本扩展的固定 Chrome 来源。扩展 ID 为 `afojfnpkeokahhniipldpdpecaljdnbe`；如果此前加载过不含固定 ID 的开发版，请在 `chrome://extensions` 移除旧版，再加载当前 `dist`。插件自动取得本机访问凭据并保存在 Chrome 本地存储，Reader 只保存凭据哈希。若端口被占用，设置页会显示连接不可用。连接不向 Zotero 或 Reader 云端发送内容。
+启动 Reader 桌面版后，点击扩展即可自动连接。Reader 的连接入口固定监听 `127.0.0.1:17841`，只接受本扩展的固定 Chrome 来源。本地测试版 ID 为 `afojfnpkeokahhniipldpdpecaljdnbe`；如果此前加载过不含固定 ID 的开发版，请在 `chrome://extensions` 移除旧版，再加载用开发密钥构建的 `dist`。商店版 ID 为 `dfhdcomjdkaiajiibbkonbonjlnkdjlg`，Reader 同时接受这两个来源（`apps/server/internal/reader/connector.go`）；商店 ID 变化时须同步更新并发布桌面版。插件自动取得本机访问凭据并保存在 Chrome 本地存储，Reader 只保存凭据哈希。若端口被占用，设置页会显示连接不可用。连接不向 Zotero 或 Reader 云端发送内容。
 
 测试开发版插件连接时，先关闭已安装的 Reader，再以 `READER_DEV_CONNECTOR=1 pnpm desktop` 或 `READER_DEV_CONNECTOR=1 pnpm dev` 启动开发版。
 

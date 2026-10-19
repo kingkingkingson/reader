@@ -44,10 +44,36 @@ func TestFrozenStreamFixtures(t *testing.T) {
 				if err = json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &value); err != nil {
 					t.Fatal(err)
 				}
-				if len(value) != 1 {
+				if event != "activity" && event != "draft" && len(value) != 1 {
 					t.Fatal("unexpected fields")
 				}
 				switch event {
+				case "reasoning":
+					if _, ok := value["text"].(string); !ok {
+						t.Fatal(value)
+					}
+				case "draft":
+					if len(value) != 2 {
+						t.Fatal(value)
+					}
+					if _, ok := value["text"].(string); !ok {
+						t.Fatal(value)
+					}
+					if _, ok := value["reset"].(bool); !ok {
+						t.Fatal(value)
+					}
+				case "activity":
+					if len(value) < 2 || len(value) > 3 || (value["phase"] != "indexing" && value["phase"] != "reading" && value["phase"] != "writing") {
+						t.Fatal(value)
+					}
+					if _, ok := value["message"].(string); !ok {
+						t.Fatal(value)
+					}
+					if len(value) == 3 {
+						if _, ok := value["tool"].(string); !ok {
+							t.Fatal(value)
+						}
+					}
 				case "status":
 					if value["status"] != "reading" && value["status"] != "reading-image" {
 						t.Fatal(value)

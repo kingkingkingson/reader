@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 )
 
 type chatStreamWriter struct {
+	mu         sync.Mutex
 	w          http.ResponseWriter
 	cancel     context.CancelFunc
 	terminal   bool
@@ -17,6 +20,8 @@ type chatStreamWriter struct {
 }
 
 func (s *chatStreamWriter) send(event string, value any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.terminal {
 		return generationError(ErrorProtocol, "输出流已结束")
 	}
@@ -34,7 +39,7 @@ func (s *chatStreamWriter) send(event string, value any) error {
 		s.terminal = true
 		s.cancel()
 	}
-	if err == nil && event == "delta" && s.firstFlush.IsZero() {
+	if err == nil && (event == "delta" || event == "draft" || event == "reasoning") && s.firstFlush.IsZero() {
 		s.firstFlush = time.Now()
 	}
 	return err
@@ -64,22 +69,29 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		_ = controller.SetWriteDeadline(time.Time{})
 	}()
 	started := time.Now()
-	requestID := id()
+	requestID := requestID(ctx)
+	if requestID == "" {
+		requestID = id()
+	}
 	var firstText time.Time
 	var finalErr error
 	out := &chatStreamWriter{w: w, cancel: cancel}
 	defer func() {
-		attrs := []any{"request", requestID, "duration_ms", time.Since(started).Milliseconds()}
+		attrs := []any{"requestId", requestID, "durationMs", time.Since(started).Milliseconds()}
 		if !firstText.IsZero() {
-			attrs = append(attrs, "first_text_ms", firstText.Sub(started).Milliseconds())
+			attrs = append(attrs, "firstTextMs", firstText.Sub(started).Milliseconds())
 		}
 		if !out.firstFlush.IsZero() {
-			attrs = append(attrs, "first_flush_ms", out.firstFlush.Sub(started).Milliseconds())
+			attrs = append(attrs, "firstFlushMs", out.firstFlush.Sub(started).Milliseconds())
 		}
 		if finalErr != nil {
-			attrs = append(attrs, "error_kind", errorKind(finalErr))
+			attrs = append(attrs, "errorCode", errorKind(finalErr))
 		}
-		slog.Info("chat generation finished", attrs...)
+		level := slog.LevelInfo
+		if finalErr != nil {
+			level = slog.LevelError
+		}
+		slog.Log(ctx, level, "chat.finish", attrs...)
 	}()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -91,6 +103,37 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	if finalErr = out.send("status", map[string]string{"status": status}); finalErr != nil {
 		return
 	}
+	contextWarning := ""
+	if in.Chat != nil && len(in.images()) == 0 && (config.Primary == "codex" || config.Primary == "api") {
+		d, docErr := s.Store.Document(documentID)
+		if docErr == nil {
+			if _, fileErr := os.Stat(s.Store.File(d)); fileErr == nil {
+				corpus, corpusErr := s.documentCorpus(ctx, documentID, func() error {
+					return out.send("activity", map[string]string{"phase": "indexing", "message": "正在建立全文检索索引"})
+				})
+				if corpusErr != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					message := "全文索引未就绪，使用当前摘录"
+					if in.Chat.CurrentText == "" {
+						message = "全文索引未就绪，当前未提供原文"
+						contextWarning = "\n本轮没有可用的原文工具或新原文，阅读位置不能作为内容依据。问题需要核查原文时明确说明暂时无法读取，不猜测页面内容。"
+					}
+					if finalErr = out.send("activity", map[string]string{"phase": "reading", "message": message}); finalErr != nil {
+						return
+					}
+				} else {
+					in.Chat.Agent = &documentAgent{server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool, message string) error {
+						return out.send("activity", map[string]string{"phase": phase, "tool": tool, "message": message})
+					}}
+				}
+			}
+		}
+	}
+	if in.Chat != nil && in.Chat.Agent == nil {
+		in.Prompt = in.Chat.legacyPrompt() + readingLocationPrompt(in.Chat.ReadingLocation) + contextWarning
+	}
 	service := s.generationService(config)
 	if _, err := s.Store.DB.Exec("INSERT OR IGNORE INTO chat_usage_coverage(document_id,history_complete) VALUES(?,1)", documentID); err != nil {
 		finalErr = generationError(ErrorSave, "无法保存聊天统计")
@@ -99,6 +142,15 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	}
 	service.usageSink = s.processingUsageSink(documentID, "chat", requestID)
 	result, err := service.Generate(ctx, in, true, func(e ProviderEvent) error {
+		if e.Reasoning != "" {
+			return out.send("reasoning", map[string]string{"text": e.Reasoning})
+		}
+		if e.Draft != "" || e.ResetDraft {
+			if firstText.IsZero() && e.Draft != "" {
+				firstText = time.Now()
+			}
+			return out.send("draft", map[string]any{"text": e.Draft, "reset": e.ResetDraft})
+		}
 		if e.Fallback != "" {
 			return out.send("fallback", map[string]string{"message": e.Fallback})
 		}
@@ -113,12 +165,17 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	if err == nil {
 		if _, err = s.Store.Document(documentID); err != nil {
 			err = generationError(ErrorCanceled, "文档已不可用")
-		} else if err = s.Store.saveMessage(Message{DocumentID: documentID, Role: "assistant", Content: result.Text}); err != nil {
+		} else if in.Chat != nil && in.Chat.Agent != nil {
+			err = s.saveDocumentAgentAnswer(ctx, in.Chat.Agent, result.Text, result.Provider, result.Reasoning)
+		} else if err = s.Store.saveMessage(Message{DocumentID: documentID, Role: "assistant", Content: result.Text, Reasoning: result.Reasoning}); err != nil {
 			err = generationError(ErrorSave, "回答已收到，但无法保存到本地数据库")
 		}
 	}
 	finalErr = err
 	if err != nil {
+		if in.Chat != nil && in.Chat.Agent != nil {
+			s.saveFailedDocumentRun(in.Chat.Agent, result.Provider, err)
+		}
 		if ctx.Err() == nil {
 			_ = out.send("error", map[string]string{"error": err.Error()})
 		}

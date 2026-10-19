@@ -16,12 +16,15 @@ import (
 )
 
 type AgentModel struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Description    string   `json:"description"`
-	Default        bool     `json:"isDefault"`
-	Aliases        []string `json:"aliases,omitempty"`
-	RecommendedFor []string `json:"recommendedFor,omitempty"`
+	EffortInfo      *APIEffortInfo `json:"effortInfo,omitempty"`
+	ContextWindow   int            `json:"contextWindow,omitempty"`
+	MaxOutputTokens int            `json:"maxOutputTokens,omitempty"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	Description     string         `json:"description"`
+	Default         bool           `json:"isDefault"`
+	Aliases         []string       `json:"aliases,omitempty"`
+	RecommendedFor  []string       `json:"recommendedFor,omitempty"`
 	// API agent only: an ID the user added, and the model's own check result.
 	Custom           bool        `json:"custom,omitempty"`
 	Capability       *Capability `json:"capability,omitempty"`

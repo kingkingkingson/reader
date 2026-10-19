@@ -1,3 +1,9 @@
+import { diagnosticFetch, reportDiagnostic } from "./diagnostics";
+import {
+  diagnosticError,
+  diagnosticRoute,
+} from "../../reader-core/src/diagnostics";
+export { setDiagnosticReporter, reportDiagnostic } from "./diagnostics";
 import {
   consumeTranslationStream,
   type TranslationEvent,
@@ -8,6 +14,8 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
 import type {
   Document,
+  DocumentOverview,
+  OverviewJob,
   TagBoard,
   DocumentLocation,
   Annotation,
@@ -28,6 +36,8 @@ import type {
   PaperMetadata,
   PaperMetadataField,
   ReadingStatus,
+  JournalRankConfig,
+  JournalRankResult,
 } from "@reader/core";
 let sessionToken = "";
 export function configureAPI(token: string) {
@@ -36,17 +46,47 @@ export function configureAPI(token: string) {
 export function publicationURL(documentId: string, resource: string) {
   return `/pub/${encodeURIComponent(sessionToken)}/${encodeURIComponent(documentId)}/${resource}`;
 }
-export function blockImageURL(documentId: string, blockId: string) {
+export function blockImageURL(
+  documentId: string,
+  blockId: string,
+  revision?: string,
+) {
   return publicationURL(
     documentId,
-    `assets/${encodeURIComponent(blockId)}.png`,
+    `assets/${encodeURIComponent(blockId)}.png${revision ? `?v=${encodeURIComponent(revision)}` : ""}`,
   );
 }
 export const client = createClient<paths>();
 client.use({
   onRequest({ request }) {
     request.headers.set("Authorization", `Bearer ${sessionToken}`);
+    reportDiagnostic({
+      level: "info",
+      event: "api.start",
+      route: diagnosticRoute(new URL(request.url).pathname),
+      method: request.method,
+    });
     return request;
+  },
+  onResponse({ request, response }) {
+    reportDiagnostic({
+      level: response.ok ? "info" : "error",
+      event: "api.finish",
+      route: diagnosticRoute(new URL(request.url).pathname),
+      method: request.method,
+      status: response.status,
+      requestId: response.headers.get("X-Reader-Request-ID") || undefined,
+    });
+    return response;
+  },
+  onError({ request, error }) {
+    reportDiagnostic({
+      level: "error",
+      event: "api.failed",
+      route: diagnosticRoute(new URL(request.url).pathname),
+      method: request.method,
+    });
+    return;
   },
 });
 /** A failed request; `code` and `pages` identify a long paper to confirm. */
@@ -60,7 +100,7 @@ export class RequestError extends Error {
   }
 }
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
+  const response = await diagnosticFetch(path, {
     ...init,
     headers: {
       Authorization: `Bearer ${sessionToken}`,
@@ -110,6 +150,22 @@ function annotationRequest<T>(path: string, init: RequestInit): Promise<T> {
 export type ZoteroScan = components["schemas"]["ZoteroScan"];
 export type ZoteroImportResult = components["schemas"]["ZoteroImportResult"];
 export const api = {
+  journalRankConfig: () =>
+    request<JournalRankConfig>("/api/journal-ranks/config"),
+  saveJournalRankConfig: (config: {
+    enabled: boolean;
+    filterMode: JournalRankConfig["filterMode"];
+    selected: string[];
+    key?: string;
+  }) =>
+    request<JournalRankConfig>("/api/journal-ranks/config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
+  documentJournalRank: (id: string, refresh = false) =>
+    request<JournalRankResult>(
+      `/api/documents/${encodeURIComponent(id)}/journal-rank${refresh ? "?refresh=1" : ""}`,
+    ),
   connectorStatus: () =>
     request<
       paths["/api/connector/status"]["get"]["responses"][200]["content"]["application/json"]
@@ -120,16 +176,34 @@ export const api = {
     request<{ available: boolean; sourceUrl?: string }>(
       `/api/documents/${encodeURIComponent(id)}/snapshot`,
     ),
+  scanEndNote: (directory: string) =>
+    request<ZoteroScan>("/api/import/endnote/scan", {
+      method: "POST",
+      body: JSON.stringify({ directory }),
+    }),
+  importEndNote: (
+    scanId: string,
+    entryId: string,
+    options?: { library: LibraryMode; allowLarge: boolean },
+  ) =>
+    request<ZoteroImportResult>("/api/import/endnote", {
+      method: "POST",
+      body: JSON.stringify({ scanId, entryId, ...options }),
+    }),
   zoteroDefaults: () => request<{ directory: string }>("/api/import/zotero"),
   scanZotero: (directory: string, linkedBase = "") =>
     request<ZoteroScan>("/api/import/zotero/scan", {
       method: "POST",
       body: JSON.stringify({ directory, linkedBase }),
     }),
-  importZotero: (scanId: string, entryId: string) =>
+  importZotero: (
+    scanId: string,
+    entryId: string,
+    options?: { library: LibraryMode; allowLarge: boolean },
+  ) =>
     request<ZoteroImportResult>("/api/import/zotero", {
       method: "POST",
-      body: JSON.stringify({ scanId, entryId }),
+      body: JSON.stringify({ scanId, entryId, ...options }),
     }),
   chatUsage: (id: string) =>
     request<ProcessingUsage>(
@@ -154,12 +228,21 @@ export const api = {
     request<void>(`/api/tag-boards/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+  translateSelection: (
+    selection: { text: string; context?: { before: string; after: string } },
+    signal: AbortSignal,
+  ) =>
+    request<{ text: string }>("/api/translate-selection", {
+      method: "POST",
+      body: JSON.stringify({ text: selection.text, ...selection.context }),
+      signal,
+    }),
   translationStream: async (
     id: string,
     signal: AbortSignal,
     onEvent: (event: TranslationEvent) => void,
   ) => {
-    const response = await fetch(
+    const response = await diagnosticFetch(
       `/api/documents/${encodeURIComponent(id)}/translations/stream`,
       {
         headers: {
@@ -196,6 +279,30 @@ export const api = {
     request<import("@reader/core").TranslationBlock[]>(
       `/api/documents/${id}/translations`,
     ),
+  exportTranslation: async (
+    id: string,
+    format: "markdown" | "zip",
+    signal?: AbortSignal,
+    notesMarkdown = "",
+  ): Promise<Blob> => {
+    const response = await diagnosticFetch(
+      `/api/documents/${encodeURIComponent(id)}/translations/export?format=${format}`,
+      {
+        method: notesMarkdown ? "POST" : "GET",
+        headers: {
+          Authorization: `Bearer ${sessionToken}`,
+          ...(notesMarkdown && { "Content-Type": "application/json" }),
+        },
+        ...(notesMarkdown && { body: JSON.stringify({ notesMarkdown }) }),
+        signal,
+      },
+    );
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new RequestError(data.error || `导出失败 (${response.status})`);
+    }
+    return response.blob();
+  },
   translate: (id: string, blockId = "", force = false) =>
     request<{ queued: boolean }>(`/api/documents/${id}/translations`, {
       method: "POST",
@@ -248,10 +355,27 @@ export const api = {
     ),
   assistance: (id: string) =>
     request<Processing>(`/api/documents/${id}/assistance`),
-  setAssistance: (id: string, action: "start" | "pause" | "resume") =>
+  setAssistance: (
+    id: string,
+    action: "start" | "pause" | "resume" | "retranslate",
+  ) =>
     request<Processing>(`/api/documents/${id}/assistance`, {
       method: "POST",
       body: JSON.stringify({ action }),
+    }),
+  overviewJobs: () => request<OverviewJob[]>("/api/overviews"),
+  documentOverview: (id: string) =>
+    request<DocumentOverview>(
+      `/api/documents/${encodeURIComponent(id)}/overview`,
+    ),
+  generateOverview: (id: string, regenerate = false) =>
+    request<DocumentOverview>(
+      `/api/documents/${encodeURIComponent(id)}/overview`,
+      { method: "POST", body: JSON.stringify({ regenerate }) },
+    ),
+  cancelOverview: (id: string) =>
+    request<void>(`/api/documents/${encodeURIComponent(id)}/overview/job`, {
+      method: "DELETE",
     }),
   processing: () => request<Processing[]>("/api/processing"),
   process: (id: string) =>
@@ -270,12 +394,15 @@ export const api = {
     }),
   testAI: (
     provider: string,
-    capability?: "text" | "vision",
+    capability?: "text" | "vision" | "tools",
     model?: string,
+    timeoutSeconds?: number,
   ) => {
     const query = new URLSearchParams();
     if (capability) query.set("capability", capability);
     if (model) query.set("model", model);
+    if (timeoutSeconds !== undefined)
+      query.set("timeoutSeconds", String(timeoutSeconds));
     return request<AICapability>(
       `/api/ai/test/${provider}${query.size ? `?${query}` : ""}`,
       { method: "POST" },
@@ -286,7 +413,7 @@ export const api = {
     if (error) throw new Error(error.error);
     return data;
   },
-  /** Papers over 50 pages fail with code "large-paper" unless allowLarge. */
+  /** Papers over 100 pages or 100 MB fail with code "large-paper" unless allowLarge. */
   import: (file: File, library: LibraryMode = "books", allowLarge = false) => {
     const form = new FormData();
     form.append("library", library);
@@ -295,10 +422,13 @@ export const api = {
     return request<Document>("/api/documents", { method: "POST", body: form });
   },
   /** Import a paper from an arXiv ID, DOI, paper link, PDF link or title. */
-  resolveDocument: (ref: string) =>
+  resolveDocument: (
+    ref: string,
+    options?: { library: LibraryMode; allowLarge: boolean },
+  ) =>
     request<Document>("/api/documents/resolve", {
       method: "POST",
-      body: JSON.stringify({ ref }),
+      body: JSON.stringify({ ref, ...options }),
     }),
   lookupMetadata: (id: string) =>
     request<Document>(
@@ -450,6 +580,10 @@ export const api = {
     ),
   messages: (id: string, signal?: AbortSignal) =>
     request<Message[]>(`/api/documents/${id}/messages`, { signal }),
+  validateEvidence: (id: string, message: string, source: string) =>
+    request<{ valid: boolean }>(
+      `/api/documents/${encodeURIComponent(id)}/messages/${encodeURIComponent(message)}/sources/${encodeURIComponent(source)}`,
+    ),
   providers: (checkAuth = true) =>
     request<Provider[]>(`/api/providers${checkAuth ? "" : "?auth=skip"}`),
   /** Rename a category across a library, or remove it when `to` is omitted. */
@@ -470,6 +604,17 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(preferences),
     }),
+  shortcutPreferences: () =>
+    request<Record<string, { key: string; shift: boolean }>>(
+      "/api/preferences/shortcuts",
+    ),
+  saveShortcutPreferences: (
+    preferences: Record<string, { key: string; shift: boolean }>,
+  ) =>
+    request<Record<string, { key: string; shift: boolean }>>(
+      "/api/preferences/shortcuts",
+      { method: "PUT", body: JSON.stringify(preferences) },
+    ),
   guidePreferences: () => request<GuidePreferences>("/api/preferences/guide"),
   saveGuidePreferences: (preferences: GuidePreferences) =>
     request<GuidePreferences>("/api/preferences/guide", {
@@ -494,8 +639,10 @@ export async function chat(
   attachments: string[] = [],
   onFallback?: (message: string) => void,
   onEvent?: (event: ChatStreamEvent) => void,
+  readingLocation?: DocumentLocation,
+  userMessageId?: string,
 ) {
-  const response = await fetch(`/api/documents/${id}/chat`, {
+  const response = await diagnosticFetch(`/api/documents/${id}/chat`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${sessionToken}`,
@@ -506,7 +653,9 @@ export async function chat(
       prompt,
       context,
       references,
+      readingLocation,
       attachments,
+      userMessageId,
     }),
     signal,
   });
@@ -515,9 +664,24 @@ export async function chat(
     throw new Error(data.error || `AI 请求失败 (${response.status})`);
   }
   if (!response.body) throw new Error("没有收到 AI 输出");
-  await consumeChatStream(response.body, signal, (event) => {
-    onEvent?.(event);
-    if (event.event === "delta") onDelta(event.data.text);
-    if (event.event === "fallback") onFallback?.(event.data.message);
-  });
+  try {
+    await consumeChatStream(response.body, signal, (event) => {
+      onEvent?.(event);
+      if (event.event === "delta") onDelta(event.data.text);
+      if (event.event === "fallback") onFallback?.(event.data.message);
+    });
+    reportDiagnostic({
+      level: "info",
+      event: "chat.stream_finish",
+      requestId: response.headers.get("X-Reader-Request-ID") || undefined,
+    });
+  } catch (error) {
+    reportDiagnostic({
+      level: signal.aborted ? "info" : "error",
+      event: signal.aborted ? "chat.stream_cancelled" : "chat.stream_failed",
+      requestId: response.headers.get("X-Reader-Request-ID") || undefined,
+      ...diagnosticError(error),
+    });
+    throw error;
+  }
 }

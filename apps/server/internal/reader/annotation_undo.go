@@ -82,7 +82,7 @@ func annotationDiff(before, after map[string]string) annotationChange {
 }
 
 // Serialize all annotation HTTP mutations, including clients without history.
-// Diffs include every underline absorbed by the existing merge transaction.
+// Diffs include every mark absorbed by the merge transaction.
 func (s *Server) recordAnnotation(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.annotationMu.Lock()

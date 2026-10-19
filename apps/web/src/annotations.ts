@@ -64,38 +64,3 @@ export const colorLabel = (
 
 export const validHighlightColor = (value: string) =>
   /^#[0-9a-f]{6}$/i.test(value);
-
-/**
- * The reader's marks grouped by color, so questions like "how do my red
- * formulas relate" can be answered. Bookmarks carry no text and are skipped.
- */
-export function annotationContext(
-  annotations: Annotation[],
-  limit = 4000,
-  palette: HighlightColor[] = highlightColors,
-) {
-  const groups = new Map<string, Annotation[]>();
-  for (const a of [...annotations].sort(documentOrder)) {
-    if (a.kind === "bookmark" || !(a.quote || a.note)) continue;
-    const label = colorLabel(a.color || highlightColors[0].value, palette);
-    groups.set(label, [...(groups.get(label) || []), a]);
-  }
-  if (!groups.size) return "";
-  const lines = ["[读者的标注，按颜色分组]"];
-  for (const [label, items] of groups) {
-    lines.push(`${label}（${items.length} 处）：`);
-    for (const a of items) {
-      const place =
-        a.location.type === "pdf" ? `第 ${a.location.page} 页` : "章节";
-      const quote = a.quote.replace(/\s+/g, " ").slice(0, 300);
-      const note = a.note.trim()
-        ? ` —— ${a.kind === "question" ? "问题" : "批注"}：${a.note.replace(/\s+/g, " ").slice(0, 200)}`
-        : "";
-      lines.push(`- ${place}：${quote ? `“${quote}”` : ""}${note}`);
-    }
-  }
-  let text = lines.join("\n");
-  if (text.length > limit)
-    text = text.slice(0, limit) + "\n…（其余标注已省略）";
-  return text;
-}

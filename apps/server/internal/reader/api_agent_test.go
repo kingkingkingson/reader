@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -106,13 +107,13 @@ func TestAPIAgentUsesOnlyCheckedModels(t *testing.T) {
 	if apiCapable(config, taskChat, true) || apiCapable(config, taskChat, false) || !apiCapable(config, taskTranslation, false) {
 		t.Fatal("choices bypassed their model checks")
 	}
-	// Chosen models and efforts are sent as chosen; plain advertises no effort.
+	// Models without effort metadata use the standard low/medium/high tiers.
 	passModels(&config, map[string]bool{"plain": false})
 	config.Efforts = map[string]map[string]string{"api": {"plain": "max"}}
 	if _, err := s.apiAgentAdapter(config, taskChat).Stream(t.Context(), GenerateRequest{AIInput{Prompt: "hi"}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := calls()[len(calls())-1]; got.Model != "plain" || got.Effort != "" {
+	if got := calls()[len(calls())-1]; got.Model != "plain" || got.Effort != "high" {
 		t.Fatalf("chosen model: %+v", got)
 	}
 	models, err := s.apiAgentModels(t.Context(), config)
@@ -175,7 +176,7 @@ func TestAPIModelCheckIsPerModel(t *testing.T) {
 	if !capable(saved, "api:deepseek-flash", false) || capable(saved, "api:broken", false) || saved.Capabilities["api:broken"].Error == "" {
 		t.Fatalf("per-model results: %+v", saved.Capabilities)
 	}
-	if got := calls(); got[0].Model != "deepseek-flash" || got[0].Effort != "" || got[1].Model != "broken" {
+	if got := calls(); got[0].Model != "deepseek-flash" || got[0].Effort != "high" || got[1].Model != "broken" {
 		t.Fatalf("probes: %+v", got)
 	}
 }
@@ -309,7 +310,7 @@ func TestLiveDeepSeekTranslationSession(t *testing.T) {
 	batch := translationBatch{Paragraphs: []translationParagraph{{BlockID: "p7-b3", SourceHash: translationHash(source), Source: source}}}
 	var rows []TranslationBlock
 	decoder := newTranslationJSONL(batch, func(b TranslationBlock) error { rows = append(rows, b); return nil })
-	result, err := session.Stream(ctx, GenerateRequest{AIInput{Prompt: translationPrompt(Document{Title: "Live"}, layoutManifest{}, batch, "")}}, func(e ProviderEvent) error {
+	result, err := session.Stream(ctx, GenerateRequest{AIInput{Prompt: translationPrompt(Document{Title: "Live"}, layoutManifest{}, batch, "", "")}}, func(e ProviderEvent) error {
 		return decoder.feed(e.Text)
 	})
 	if err == nil && strings.TrimSpace(decoder.buffer) != "" {
@@ -346,5 +347,70 @@ func TestLiveDeepSeekCapabilityCheck(t *testing.T) {
 	saved := s.aiConfig()
 	if !apiCapable(saved, taskChat, false) || !apiCapable(saved, taskChat, true) {
 		t.Fatal("no model passed text and vision")
+	}
+}
+
+func TestAPIAgentEffortWithoutMetadata(t *testing.T) {
+	for _, task := range []modelTask{taskChat, taskTranslation, taskVision} {
+		for _, level := range []string{"low", "medium", "high", "max"} {
+			t.Run(string(task)+"/"+level, func(t *testing.T) {
+				s := testServer(t)
+				upstream, calls := fakeAPI(t, func(int, apiCall) string { return "ok" })
+				config := AIConfig{Primary: "api", API: APIConnection{URL: upstream.URL + "/v1", Key: "sk-test"}, Models: map[string]string{"api": "plain"}, TranslationModels: map[string]string{"api": "plain"}, VisionModels: map[string]string{"api": "plain"}}
+				effort := map[string]map[string]string{"api": {"plain": level}}
+				config.Efforts, config.TranslationEfforts, config.VisionEfforts = effort, effort, effort
+				input := AIInput{Prompt: "hi"}
+				if task == taskVision {
+					input.Images = [][]byte{{1}}
+				}
+				if _, err := s.apiAgentAdapter(config, task).Stream(t.Context(), GenerateRequest{input}, nil); err != nil {
+					t.Fatal(err)
+				}
+				want := level
+				if want == "max" {
+					want = "high"
+				}
+				if got := calls()[0].Effort; got != want {
+					t.Fatalf("sent reasoning_effort %q, want %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestAPIEffortNearestSupportedTier(t *testing.T) {
+	for _, tt := range []struct {
+		level     string
+		supported []string
+		want      string
+	}{
+		{"medium", []string{"low", "high"}, "high"},
+		{"high", []string{"medium", "max"}, "medium"},
+		{"low", []string{"max"}, "max"},
+		{"max", []string{"low", "medium", "high", "xhigh"}, "xhigh"},
+		{"max", []string{"low", "high", "max"}, "max"},
+	} {
+		if got := apiEffort(tt.level, tt.supported); got != tt.want {
+			t.Fatalf("%s/%v: got %s want %s", tt.level, tt.supported, got, tt.want)
+		}
+	}
+}
+
+func TestAPIAgentEffortSurvivesMissingCatalog(t *testing.T) {
+	for _, custom := range []bool{false, true} {
+		adapter := apiAgentAdapter{
+			conn: APIConnection{URL: "https://example.test/v1"},
+			text: apiModelChoice{"custom-model", "low"},
+			catalog: func(context.Context) ([]AgentModel, error) {
+				if custom {
+					return []AgentModel{{ID: "custom-model", Custom: true}}, nil
+				}
+				return nil, errors.New("catalog unavailable")
+			},
+		}
+		req, err := adapter.resolve(t.Context(), false)
+		if err != nil || req.Model != "custom-model" || req.Effort != "low" {
+			t.Fatalf("%+v %v", req, err)
+		}
 	}
 }

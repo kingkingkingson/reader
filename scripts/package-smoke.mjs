@@ -121,8 +121,24 @@ try {
   assert.equal(web.status, 200);
   assert.match(await web.text(), /<div id="root">/);
   assert.equal((await request("/samples/reading-notes.pdf")).status, 200);
+  // The command line finds the running service through the library directory.
+  const cli = spawnSync(
+    join(resources, "bin", `reader${windows ? ".exe" : ""}`),
+    ["status", "--json"],
+    {
+      cwd: temporary,
+      env: { ...process.env, READER_DATA: join(temporary, "library") },
+      encoding: "utf8",
+      timeout: 20000,
+    },
+  );
+  if (cli.error) throw cli.error;
+  assert.equal(cli.status, 0, `Packaged command line failed: ${cli.stderr}`);
+  const status = JSON.parse(cli.stdout);
+  assert.equal(status.url, ready.url);
+  assert.equal(status.documents, 0);
   console.log(
-    "Packaged Go service, SQLite, API authentication and web resources passed.",
+    "Packaged Go service, SQLite, API authentication, command line and web resources passed.",
   );
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) {

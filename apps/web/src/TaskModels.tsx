@@ -154,6 +154,9 @@ export function TaskModels({ disabled }: { disabled: boolean }) {
         const defaultLabel =
           recommended?.name ??
           (!empty ? "默认模型" : untested ? "等待检测" : "无可用模型");
+        const effortInfo = (current ?? recommended)?.effortInfo;
+        const fixedEffort =
+          effortInfo?.mode === "fixed" || effortInfo?.mode === "unknown";
         const options =
           current &&
           provider !== "api" &&
@@ -161,70 +164,92 @@ export function TaskModels({ disabled }: { disabled: boolean }) {
             ? [current, ...usable]
             : usable;
         return (
-          <div key={task} className="flex items-center gap-2">
-            <span className="w-10 shrink-0 text-sm" id={`${task}-model-label`}>
-              {label}
-            </span>
-            <Select
-              value={current?.id ?? recommended?.id ?? AUTO}
-              disabled={disabled || saving || (empty && !current)}
-              onValueChange={(value) =>
-                value &&
-                void chooseModel(task, value === recommended?.id ? AUTO : value)
-              }
-            >
-              <SelectTrigger
-                className="min-w-0 flex-1"
-                aria-label={`${label}模型`}
-                aria-busy={loading || saving}
+          <div key={task}>
+            <div className="flex items-center gap-2">
+              <span
+                className="w-10 shrink-0 text-sm"
+                id={`${task}-model-label`}
               >
-                <SelectValue>
-                  {current
-                    ? `${current.name}${unavailable ? "（未通过检测）" : ""}`
-                    : loading
-                      ? "加载模型…"
-                      : defaultLabel}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {!recommended && !empty && (
-                  <SelectItem value={AUTO} label={defaultLabel}>
-                    {defaultLabel}
-                  </SelectItem>
-                )}
-                {options.map((m) => (
-                  <SelectItem key={m.id} value={m.id} label={m.name}>
-                    {m.name}
-                  </SelectItem>
-                ))}
-                {!loading && error && (
-                  <div
-                    className="px-2 py-1.5 text-xs text-muted-foreground"
-                    role="alert"
-                  >
-                    {error}
-                  </div>
-                )}
-              </SelectContent>
-            </Select>
-            <Select
-              value={effort}
-              disabled={disabled || saving || (empty && !current)}
-              onValueChange={(value) =>
-                value && void chooseEffort(task, model, value)
-              }
-            >
-              <SelectTrigger className="w-28" aria-label={`${label} Effort`}>
-                <SelectValue>{effortLabel(effort)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {efforts.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {effortLabel(value)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+                {label}
+              </span>
+              <Select
+                value={current?.id ?? recommended?.id ?? AUTO}
+                disabled={disabled || saving || (empty && !current)}
+                onValueChange={(value) =>
+                  value &&
+                  void chooseModel(
+                    task,
+                    value === recommended?.id ? AUTO : value,
+                  )
+                }
+              >
+                <SelectTrigger
+                  className="min-w-0 flex-1"
+                  aria-label={`${label}模型`}
+                  aria-busy={loading || saving}
+                >
+                  <SelectValue>
+                    {current
+                      ? `${current.name}${unavailable ? "（未通过检测）" : ""}`
+                      : loading
+                        ? "加载模型…"
+                        : defaultLabel}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {!recommended && !empty && (
+                    <SelectItem value={AUTO} label={defaultLabel}>
+                      {defaultLabel}
+                    </SelectItem>
+                  )}
+                  {options.map((m) => (
+                    <SelectItem key={m.id} value={m.id} label={m.name}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                  {!loading && error && (
+                    <div
+                      className="px-2 py-1.5 text-xs text-muted-foreground"
+                      role="alert"
+                    >
+                      {error}
+                    </div>
+                  )}
+                </SelectContent>
+              </Select>
+              <Select
+                value={effort}
+                disabled={
+                  disabled || saving || fixedEffort || (empty && !current)
+                }
+                onValueChange={(value) =>
+                  value && void chooseEffort(task, model, value)
+                }
+              >
+                <SelectTrigger className="w-28" aria-label={`${label} Effort`}>
+                  <SelectValue>
+                    {fixedEffort ? "固定／自动" : effortLabel(effort)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {efforts.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {effortLabel(value)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {effortInfo && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {effortInfo.note}
+                {!fixedEffort &&
+                effortInfo.mappings?.[effort] &&
+                effortInfo.mappings[effort] !== effort
+                  ? ` ${effort} → ${effortInfo.mappings[effort]}${effortInfo.mode === "budget" ? " tokens" : ""}`
+                  : ""}
+              </p>
+            )}
           </div>
         );
       })}

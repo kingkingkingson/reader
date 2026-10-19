@@ -1,3 +1,7 @@
+import { PaperColumns, usePaperColumns } from "./PaperColumns";
+import type { TableColumn } from "./columns";
+import { PaperTagFilterButton } from "./PaperTagFilter";
+import { Badge } from "@reader/ui/components/badge";
 import {
   useEffect,
   useMemo,
@@ -8,16 +12,17 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  X,
   ArrowDown,
   ArrowUp,
   Check,
   CheckSquare,
-  Columns3,
   List,
   Table2,
   FolderMinus,
   FolderPlus,
   Loader2,
+  Languages,
   Merge,
   MoreHorizontal,
   Tag,
@@ -36,6 +41,7 @@ import {
 import { api } from "@reader/api";
 import type {
   Document,
+  JournalRankConfig,
   PaperColumn,
   PaperSort,
   Processing,
@@ -95,6 +101,9 @@ import {
   authorsShort,
   paperByline,
   paperYear,
+  publicationDate,
+  paperProgress,
+  fileSize,
   relativeTime,
   venueLabel,
   wasOpened,
@@ -103,7 +112,7 @@ import {
   categoryTree,
   columnLabels,
   columnSort,
-  defaultColumns,
+  defaultColumnWidths,
   descendingSorts,
   duplicateGroups,
   filterPapers,
@@ -116,7 +125,6 @@ import {
   paperColors,
   sortLabels,
   statusLabels,
-  toggleColumn,
   viewLabels,
   type BuiltinView,
 } from "./model";
@@ -129,6 +137,7 @@ import { MergeDialog } from "./MergeDialog";
 import { SmartCategoryDialog } from "./SmartCategoryDialog";
 import { copyCitations, exportCitations } from "./CitationMenu";
 import { PAPER_DRAG_TYPE } from "./PaperSidebar";
+import { JournalRankBadges } from "./JournalRankBadges";
 import {
   clampDetailWidth,
   detailWidthRange,
@@ -164,9 +173,21 @@ export function PaperLibrary({
   const prefs = useReaderStore((s) => s.libraryPreferences.papers) || {};
   const sort: PaperSort = prefs.sort || "opened";
   const reverse = !!prefs.sortReverse;
-  const columns = prefs.columns || defaultColumns;
+  const columnControls = usePaperColumns(prefs);
+  const columns = columnControls.visible.filter(
+    (c): c is PaperColumn => c !== "title",
+  );
   const ui = usePaperUI();
-  const { view, query, selectedId, picking, picked, naming, exporting } = ui;
+  const {
+    view,
+    query,
+    tagFilter,
+    selectedId,
+    picking,
+    picked,
+    naming,
+    exporting,
+  } = ui;
   const listRef = useRef<HTMLDivElement>(null);
   const visible = useMemo(
     () =>
@@ -176,12 +197,14 @@ export function PaperLibrary({
             subcategories: prefs.subcategoryItems !== false,
             smart: prefs.smartCategories,
             notDuplicates: prefs.notDuplicates,
+            tagFilter,
             reverse,
           }),
     [
       documents,
       view,
       query,
+      tagFilter,
       sort,
       jobs,
       prefs.subcategoryItems,
@@ -192,6 +215,28 @@ export function PaperLibrary({
   );
   const [merging, setMerging] = useState<Document[] | null>(null);
   const [tagging, setTagging] = useState<string[] | null>(null);
+  const [journalRankConfig, setJournalRankConfig] =
+    useState<JournalRankConfig | null>(null);
+  const [journalRankRefresh, setJournalRankRefresh] = useState(0);
+  useEffect(() => {
+    let mounted = true;
+    const load = () =>
+      void api
+        .journalRankConfig()
+        .then((value) => {
+          if (mounted) setJournalRankConfig(value);
+        })
+        .catch(() => {});
+    const refresh = () => setJournalRankRefresh((value) => value + 1);
+    load();
+    window.addEventListener("reader:journal-rank-config", load);
+    window.addEventListener("reader:journal-rank-refresh", refresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener("reader:journal-rank-config", load);
+      window.removeEventListener("reader:journal-rank-refresh", refresh);
+    };
+  }, []);
   const tags = paperTags(documents);
   const table = prefs.layout === "table" && view !== "duplicates";
   const sortBy = (next: PaperSort) =>
@@ -302,7 +347,11 @@ export function PaperLibrary({
   const [draftWidths, setDraftWidths] =
     useState<Partial<Record<PaperColumn, number>>>();
   const [draftDetail, setDraftDetail] = useState<number>();
-  const columnWidths = { ...prefs.columnWidths, ...draftWidths };
+  const columnWidths = {
+    ...defaultColumnWidths,
+    ...prefs.columnWidths,
+    ...draftWidths,
+  };
   const detailWidth = draftDetail ?? prefs.detailWidth;
   const saveColumnWidths = (next: Partial<Record<PaperColumn, number>>) =>
     void savePaperPreferences((p) => ({
@@ -319,7 +368,7 @@ export function PaperLibrary({
   const resizeColumn = (
     e: ReactPointerEvent<HTMLElement>,
     left: "title" | PaperColumn,
-    right: PaperColumn,
+    right: TableColumn,
   ) => {
     const start = headerWidths(e.currentTarget);
     let next: Partial<Record<PaperColumn, number>> = {};
@@ -338,7 +387,7 @@ export function PaperLibrary({
   const nudgeColumn = (
     e: ReactKeyboardEvent<HTMLElement>,
     left: "title" | PaperColumn,
-    right: PaperColumn,
+    right: TableColumn,
   ) => {
     const dx = { ArrowLeft: -resizeStep, ArrowRight: resizeStep }[e.key];
     if (!dx) return;
@@ -407,7 +456,12 @@ export function PaperLibrary({
         ?.focus(),
     );
   const onListKey = (e: React.KeyboardEvent) => {
-    if ((e.target as Element).closest("input, textarea, [role=menu]")) return;
+    if (
+      (e.target as Element).closest(
+        "input, textarea, [role=menu], [role=dialog]",
+      )
+    )
+      return;
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
       e.preventDefault();
       ui.startPicking(visibleIds);
@@ -456,9 +510,27 @@ export function PaperLibrary({
       }
     }
   };
+  const emptyState = (
+    <div className="empty-state">
+      <h2>{documents.length ? "没有符合条件的论文" : "暂无论文"}</h2>
+      {documents.length > 0 &&
+        (query || view !== "all" || tagFilter.tags.length > 0) && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              ui.setQuery("");
+              ui.setView("all");
+              ui.setTagFilter({ ...tagFilter, tags: [] });
+            }}
+          >
+            显示全部论文
+          </Button>
+        )}
+    </div>
+  );
   const renderRow = (
     doc: Document,
-    tableColumns?: PaperColumn[],
+    tableColumns?: TableColumn[],
     index = 0,
   ) => (
     <PaperRow
@@ -471,6 +543,8 @@ export function PaperLibrary({
       picking={picking}
       picked={picked.has(doc.id)}
       colors={paperColors(doc, prefs.colorCategories)}
+      journalRankConfig={journalRankConfig}
+      journalRankRefresh={journalRankRefresh}
       dragIds={() => (picked.has(doc.id) ? [...picked] : [doc.id])}
       onActivate={(e) => {
         if (picking || e.metaKey || e.ctrlKey || e.shiftKey)
@@ -478,6 +552,16 @@ export function PaperLibrary({
         else ui.select(selectedId === doc.id ? null : doc.id);
       }}
       onOpen={() => openDocument(doc)}
+      onFilterTag={(tag) =>
+        ui.setTagFilter({
+          match: "all",
+          tags: tagFilter.tags.some(
+            (item) => item.toLowerCase() === tag.toLowerCase(),
+          )
+            ? tagFilter.tags
+            : [...tagFilter.tags, tag],
+        })
+      }
       menu={
         <PaperMenuItems kind="context" docs={menuDocs(doc)} actions={actions} />
       }
@@ -504,7 +588,44 @@ export function PaperLibrary({
             <PanelLeft />
           </Button>
           <h1 className="library-title truncate">{title}</h1>
-          {view !== "trash" && (
+          {view !== "trash" && tagFilter.tags.length > 0 && (
+            <div
+              className="paper-tag-summary"
+              role="region"
+              aria-label="当前标签条件"
+            >
+              <span>{tagFilter.match === "all" ? "全部 AND" : "任一 OR"}</span>
+              {tagFilter.tags.map((tag) => (
+                <Button
+                  key={tag.toLowerCase()}
+                  variant="secondary"
+                  size="xs"
+                  title={tag}
+                  aria-label={`取消标签筛选 ${tag}`}
+                  onClick={() =>
+                    ui.setTagFilter({
+                      ...tagFilter,
+                      tags: tagFilter.tags.filter((item) => item !== tag),
+                    })
+                  }
+                >
+                  <span className="max-w-40 truncate">{tag}</span>
+                  <X className="size-3" />
+                </Button>
+              ))}
+              <span className="tabular-nums">{visible.length} 篇</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="清除当前标签条件"
+                title="清除当前标签条件"
+                onClick={() => ui.setTagFilter({ ...tagFilter, tags: [] })}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          )}
+          {view !== "trash" && tagFilter.tags.length === 0 && (
             <span className="text-xs text-muted-foreground">
               {visible.length}
             </span>
@@ -516,7 +637,8 @@ export function PaperLibrary({
               <Search className="size-4" />
               <Input
                 aria-label="搜索论文"
-                placeholder="标题、作者、出处、DOI、摘要…"
+                placeholder="标题、作者、出处、DOI、摘要、标签…"
+                title="空格分隔的词需全部命中，不支持 AND/OR 表达式；标签组合可点击表格标签列筛选"
                 value={query}
                 onChange={(e) => ui.setQuery(e.target.value)}
               />
@@ -543,38 +665,7 @@ export function PaperLibrary({
                 ))}
               </SelectContent>
             </Select>
-            {table && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="outline"
-                      aria-label="显示的列"
-                      title="显示的列"
-                    />
-                  }
-                >
-                  <Columns3 />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-40">
-                  {(Object.keys(columnLabels) as PaperColumn[]).map((c) => (
-                    <DropdownMenuCheckboxItem
-                      key={c}
-                      checked={columns.includes(c)}
-                      onCheckedChange={() =>
-                        void savePaperPreferences((p) => ({
-                          ...p,
-                          columns: toggleColumn(p.columns || defaultColumns, c),
-                        }))
-                      }
-                    >
-                      {columnLabels[c]}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {table && <PaperColumns controls={columnControls} />}
             <Tabs
               value={prefs.layout || "list"}
               onValueChange={(value) =>
@@ -808,7 +899,7 @@ export function PaperLibrary({
               <div className="empty-state">
                 <Loader2 className="animate-spin text-muted-foreground" />
               </div>
-            ) : visible.length ? (
+            ) : visible.length || table ? (
               view === "duplicates" ? (
                 <div className="paper-list" ref={listRef}>
                   {groups.map((group) => (
@@ -860,19 +951,30 @@ export function PaperLibrary({
                 </div>
               ) : table ? (
                 <div className="paper-list paper-table" ref={listRef}>
-                  <Table>
+                  <Table
+                    {...columnControls.target()}
+                    style={{
+                      minWidth:
+                        240 +
+                        (picking ? 32 : 0) +
+                        columns.reduce((sum, c) => sum + columnWidths[c], 0),
+                    }}
+                  >
+                    <caption className="sr-only">论文库</caption>
                     <TableHeader>
                       <TableRow>
                         {picking && <TableHead className="w-8" />}
-                        {(["title", ...columns] as const).map((c, i, order) => {
-                          const next = order[i + 1] as PaperColumn | undefined;
-                          const active = sort === columnSort[c];
+                        {columnControls.visible.map((c, i, order) => {
+                          const next = order[i + 1];
+                          const sortKey = columnSort[c];
+                          const active = sort === sortKey;
                           const descending =
                             descendingSorts.has(sort) !== reverse;
                           const Arrow = descending ? ArrowDown : ArrowUp;
                           return (
                             <TableHead
                               key={c}
+                              scope="col"
                               data-column={c}
                               style={
                                 c === "title"
@@ -887,15 +989,25 @@ export function PaperLibrary({
                                   : undefined
                               }
                             >
-                              <Button
-                                size="xs"
-                                variant="ghost"
-                                className="paper-table-sort"
-                                onClick={() => sortBy(columnSort[c])}
-                              >
-                                {c === "title" ? "标题" : columnLabels[c]}
-                                {active && <Arrow />}
-                              </Button>
+                              <div className="paper-column-heading">
+                                {c === "tags" ? (
+                                  <PaperTagFilterButton
+                                    documents={documents}
+                                    jobs={jobs}
+                                    trigger={columnControls.handle(c)}
+                                  />
+                                ) : (
+                                  columnControls.handle(
+                                    c,
+                                    false,
+                                    <>
+                                      {c === "title" ? "标题" : columnLabels[c]}
+                                      {active && <Arrow />}
+                                    </>,
+                                    sortKey ? () => sortBy(sortKey) : undefined,
+                                  )
+                                )}
+                              </div>
                               {/* The last column borders the menu column; the title absorbs its changes. */}
                               {next && (
                                 <span
@@ -918,7 +1030,16 @@ export function PaperLibrary({
                     </TableHeader>
                     <TableBody>
                       {visible.map((doc, index) =>
-                        renderRow(doc, columns, index),
+                        renderRow(doc, columnControls.visible, index),
+                      )}
+                      {!visible.length && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={columnControls.visible.length + 1 + (picking ? 1 : 0)}
+                          >
+                            {emptyState}
+                          </TableCell>
+                        </TableRow>
                       )}
                     </TableBody>
                   </Table>
@@ -931,20 +1052,7 @@ export function PaperLibrary({
                 </div>
               )
             ) : (
-              <div className="empty-state">
-                <h2>{documents.length ? "没有符合条件的论文" : "暂无论文"}</h2>
-                {documents.length > 0 && (query || view !== "all") && (
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      ui.setQuery("");
-                      ui.setView("all");
-                    }}
-                  >
-                    显示全部论文
-                  </Button>
-                )}
-              </div>
+              emptyState
             )}
           </section>
           {selected && !picking && (
@@ -976,6 +1084,7 @@ export function PaperLibrary({
             ui.stopPicking();
             ui.setView("all");
             ui.setQuery("");
+            ui.setTagFilter({ ...tagFilter, tags: [] });
             ui.select(doc.id);
           }}
         />
@@ -1039,6 +1148,32 @@ function PaperProcessing({ job }: { job?: Processing }) {
     retryLock.current = false;
     setRetrying(false);
   }, [job?.updatedAt]);
+  if (job?.manualTranslation && !job.enabled && job.phase !== "learning") {
+    return (
+      <Button
+        size="xs"
+        variant="ghost"
+        data-row-action
+        disabled={retrying}
+        onClick={async (event) => {
+          event.stopPropagation();
+          if (retryLock.current) return;
+          retryLock.current = true;
+          setRetrying(true);
+          try {
+            await api.setAssistance(job.documentId, "start");
+          } catch (error) {
+            retryLock.current = false;
+            setRetrying(false);
+            toast.error((error as Error).message);
+          }
+        }}
+      >
+        <Languages className="size-3" />
+        翻译
+      </Button>
+    );
+  }
   if (
     !job ||
     job.enabled === false ||
@@ -1110,11 +1245,14 @@ function PaperRow({
   picking,
   picked,
   colors,
+  journalRankConfig,
+  journalRankRefresh,
   columns,
   band,
   dragIds,
   onActivate,
   onOpen,
+  onFilterTag,
   menu,
   moreMenu,
 }: {
@@ -1124,13 +1262,16 @@ function PaperRow({
   picking: boolean;
   picked: boolean;
   colors: { name: string; color: string }[];
+  journalRankConfig: JournalRankConfig | null;
+  journalRankRefresh: number;
   /** Table columns; the row renders as a list card without them. */
-  columns?: PaperColumn[];
+  columns?: TableColumn[];
   /** Odd rows use the deeper band so neighboring entries stay distinct. */
   band: number;
   dragIds: () => string[];
   onActivate: (e: React.MouseEvent | React.KeyboardEvent) => void;
   onOpen: () => void;
+  onFilterTag: (tag: string) => void;
   menu: React.ReactNode;
   moreMenu: React.ReactNode;
 }) {
@@ -1140,7 +1281,7 @@ function PaperRow({
       {doc.type === "epub" ? <BookOpen /> : <FileText />}
     </span>
   );
-  const percent = Math.round(doc.percentage * 100);
+  const percent = paperProgress(doc.percentage);
   const check = picking && (
     <span className="paper-row-check" data-row-action>
       <Checkbox
@@ -1231,12 +1372,49 @@ function PaperRow({
         return authorsShort(doc, 2);
       case "year":
         return paperYear(doc.metadata);
+      case "published":
+        return (
+          publicationDate(doc.metadata.date)?.label || doc.metadata.date || "—"
+        );
+      case "progress":
+        return `${percent}%`;
+      case "size":
+        return fileSize(doc.size);
+      case "doi":
+        return doc.metadata.doi || "—";
+      case "arxiv":
+        return doc.metadata.arxiv || "—";
+      case "tags":
+        return doc.tags.length ? (
+          <div className="paper-table-tags" title={doc.tags.join("、")}>
+            {doc.tags.map((tag) => (
+              <Badge
+                key={tag}
+                variant="secondary"
+                render={<button type="button" />}
+                data-row-action
+                className="max-w-28 shrink-0 cursor-pointer hover:bg-secondary/80 motion-safe:active:scale-95"
+                aria-label={`按 AND 筛选标签 ${tag}`}
+                title={`加入 AND 筛选：${tag}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onFilterTag(tag);
+                }}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                <span className="truncate">#{tag}</span>
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          "—"
+        );
       case "venue":
         return venueLabel(doc.metadata);
       case "added":
         return new Date(doc.createdAt).toLocaleDateString("zh-CN");
       case "opened":
-        return wasOpened(doc) ? relativeTime(doc.lastOpenedAt) : "";
+        return wasOpened(doc) ? relativeTime(doc.lastOpenedAt) : "未打开";
       case "notes":
         return <span className="paper-row-meta">{counts}</span>;
       case "status":
@@ -1284,18 +1462,47 @@ function PaperRow({
         {columns ? (
           <>
             {picking && <TableCell className="w-8">{check}</TableCell>}
-            <TableCell className="paper-table-title">
-              <div className="paper-table-title-content">
-                {typeIcon}
-                {title}
-                <PaperProcessing job={job} />
-              </div>
-            </TableCell>
-            {columns.map((column) => (
-              <TableCell key={column} data-column={column}>
-                {cell(column)}
-              </TableCell>
-            ))}
+            {columns.map((column) =>
+              column === "title" ? (
+                <TableCell
+                  key="title"
+                  data-column="title"
+                  className="paper-table-title"
+                >
+                  <div className="paper-table-title-stack">
+                    <div className="paper-table-title-content">
+                      {typeIcon}
+                      {title}
+                      <PaperProcessing job={job} />
+                    </div>
+                    <JournalRankBadges
+                      id={doc.id}
+                      venue={doc.metadata.venue || ""}
+                      config={journalRankConfig}
+                      refreshRevision={journalRankRefresh}
+                    />
+                  </div>
+                </TableCell>
+              ) : (
+                <TableCell
+                  key={column}
+                  data-column={column}
+                  title={
+                    column === "doi"
+                      ? doc.metadata.doi
+                      : column === "arxiv"
+                        ? doc.metadata.arxiv
+                        : column === "added"
+                          ? new Date(doc.createdAt).toLocaleString("zh-CN")
+                          : column === "opened" && wasOpened(doc)
+                            ? new Date(doc.lastOpenedAt).toLocaleString("zh-CN")
+                            : undefined
+                  }
+                >
+                  {cell(column)}
+                </TableCell>
+              ),
+            )}
             <TableCell className="w-8">{more}</TableCell>
           </>
         ) : (
@@ -1309,6 +1516,12 @@ function PaperRow({
                   {byline}
                 </p>
               )}
+              <JournalRankBadges
+                id={doc.id}
+                venue={doc.metadata.venue || ""}
+                config={journalRankConfig}
+                refreshRevision={journalRankRefresh}
+              />
             </div>
             <div className="paper-row-meta">
               {counts}

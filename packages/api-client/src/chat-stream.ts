@@ -1,7 +1,17 @@
 /** Decoded frozen wire contract. No provider-native events enter the renderer. */
 export type ChatStreamEvent =
+  | {
+      event: "activity";
+      data: {
+        phase: "indexing" | "reading" | "writing";
+        message: string;
+        tool?: string;
+      };
+    }
   | { event: "status"; data: { status: "reading" | "reading-image" } }
   | { event: "delta"; data: { text: string } }
+  | { event: "reasoning"; data: { text: string } }
+  | { event: "draft"; data: { text: string; reset: boolean } }
   | { event: "fallback"; data: { message: string } }
   | { event: "error"; data: { error: string } }
   | { event: "done"; data: { ok: true } };
@@ -13,7 +23,16 @@ export class ChatStreamError extends Error {
     super(message);
   }
 }
-const known = new Set(["status", "delta", "fallback", "error", "done"]);
+const known = new Set([
+  "status",
+  "activity",
+  "delta",
+  "reasoning",
+  "draft",
+  "fallback",
+  "error",
+  "done",
+]);
 export function decodeFrame(frame: string): ChatStreamEvent | undefined {
   let event = "message";
   const data: string[] = [];
@@ -35,15 +54,22 @@ export function decodeFrame(frame: string): ChatStreamEvent | undefined {
   if (!parsed || typeof parsed !== "object")
     throw new ChatStreamError("AI 事件数据无效", "protocol");
   const valid =
-    event === "delta"
-      ? typeof parsed.text === "string"
-      : event === "fallback"
-        ? typeof parsed.message === "string"
-        : event === "error"
-          ? typeof parsed.error === "string"
-          : event === "done"
-            ? parsed.ok === true
-            : parsed.status === "reading" || parsed.status === "reading-image";
+    event === "activity"
+      ? ["indexing", "reading", "writing"].includes(String(parsed.phase)) &&
+        typeof parsed.message === "string" &&
+        (parsed.tool === undefined || typeof parsed.tool === "string")
+      : event === "draft"
+        ? typeof parsed.text === "string" && typeof parsed.reset === "boolean"
+        : event === "delta" || event === "reasoning"
+          ? typeof parsed.text === "string"
+          : event === "fallback"
+            ? typeof parsed.message === "string"
+            : event === "error"
+              ? typeof parsed.error === "string"
+              : event === "done"
+                ? parsed.ok === true
+                : parsed.status === "reading" ||
+                  parsed.status === "reading-image";
   if (!valid)
     throw new ChatStreamError("AI 事件字段无效，完成状态未确认", "protocol");
   return { event, data: parsed } as ChatStreamEvent;
@@ -59,7 +85,9 @@ export async function consumeChatStream(
     frame = "",
     cr = false,
     terminal = false,
-    textBytes = 0;
+    textBytes = 0,
+    reasoningBytes = 0,
+    draftBytes = 0;
   const abort = () => {
     void reader.cancel().catch(() => {});
   };
@@ -73,7 +101,20 @@ export async function consumeChatStream(
     const event = decodeFrame(frame);
     frame = "";
     if (!event) return;
+    if (event.event === "reasoning") {
+      reasoningBytes += new TextEncoder().encode(event.data.text).length;
+      if (reasoningBytes > 1024 * 1024)
+        throw new ChatStreamError("AI 思考内容超出大小限制", "protocol");
+    }
+    if (event.event === "draft") {
+      draftBytes = event.data.reset
+        ? 0
+        : draftBytes + new TextEncoder().encode(event.data.text).length;
+      if (draftBytes > 1024 * 1024)
+        throw new ChatStreamError("AI 暂存文本超出大小限制", "protocol");
+    }
     if (event.event === "delta") {
+      draftBytes = 0;
       textBytes += new TextEncoder().encode(event.data.text).length;
       if (textBytes > 1024 * 1024)
         throw new ChatStreamError("AI 回答超出大小限制", "protocol");

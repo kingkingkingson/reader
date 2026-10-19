@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -19,26 +20,37 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode/utf8"
 
+	"golang.org/x/sync/singleflight"
+
+	"reader.local/server/internal/diagnostics"
 	"reader.local/server/internal/scholar"
 )
 
 type Server struct {
+	Diagnostics            *diagnostics.Store
 	connectorMu            sync.Mutex
 	connectorAvailable     bool
 	connectorReason        string
 	connectorRevision      atomic.Int64
 	zoteroMu               sync.Mutex
 	zoteroScans            map[string]*zoteroScan
+	endnoteScans           map[string]*endnoteScan
 	annotationMu           sync.Mutex
 	annotationHistory      []annotationChange
 	codexChat              codexChatCache
+	documentCodex          documentCodexCache
+	corpusMu               sync.Mutex
+	overviewMu             sync.Mutex
+	overviewActive         map[string]context.CancelFunc
 	Store                  *Store
 	Token                  string
 	Web                    string
 	aiMu                   sync.Mutex
 	documentMu             sync.Mutex
+	documentClosed         bool
 	documentTasks          map[string]map[*documentTask]struct{}
 	deletingDocuments      map[string]bool
 	importMu               sync.Mutex
@@ -53,6 +65,9 @@ type Server struct {
 	modelCache             map[string]modelCatalogEntry
 	scholarMu              sync.Mutex
 	scholar                *scholar.Client
+	journalRankMu          sync.Mutex
+	journalRankLast        time.Time
+	journalRankRequests    singleflight.Group
 }
 
 func NewServer(s *Store, token, web string) *Server { return &Server{Store: s, Token: token, Web: web} }
@@ -63,6 +78,10 @@ func respond(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func fail(w http.ResponseWriter, status int, message string) {
+	if out, ok := w.(*diagnosticResponse); ok {
+		// UI explanations can contain private titles or bare hostnames.
+		out.server.diagnosticEvent(slog.LevelError, "http.failure", "requestId", out.requestID, "status", status, "errorCode", fmt.Sprintf("http_%d", status))
+	}
 	respond(w, status, map[string]string{"error": message})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -77,10 +96,13 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/diagnostics/events", s.recordDiagnostic)
+	mux.HandleFunc("GET /api/diagnostics/export", s.exportDiagnostics)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /api/documents", func(w http.ResponseWriter, r *http.Request) {
 		v, e := s.Store.Documents()
 		if e != nil {
+			s.diagnosticEvent(slog.LevelError, "database.read_failed", "requestId", requestID(r.Context()), "cause", e.Error())
 			fail(w, 500, "无法读取书库")
 			return
 		}
@@ -92,9 +114,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tag-boards/{id}", s.deleteTagBoard)
 	mux.HandleFunc("GET /api/import/zotero", s.zoteroDefaults)
 	mux.HandleFunc("GET /api/connector/status", s.connectorStatus)
+	mux.HandleFunc("GET /api/journal-ranks/config", s.getJournalRankConfig)
+	mux.HandleFunc("PUT /api/journal-ranks/config", s.putJournalRankConfig)
+	mux.HandleFunc("GET /api/documents/{id}/journal-rank", s.documentJournalRank)
 	mux.HandleFunc("GET /api/connector/revision", s.connectorRevisionStatus)
 	mux.HandleFunc("GET /api/documents/{id}/snapshot", s.connectorSnapshotStatus)
 	mux.HandleFunc("POST /api/import/zotero/scan", s.scanZotero)
+	mux.HandleFunc("POST /api/import/endnote/scan", s.scanEndNote)
+	mux.HandleFunc("POST /api/import/endnote", s.importEndNote)
 	mux.HandleFunc("POST /api/import/zotero", s.importZotero)
 	mux.HandleFunc("POST /api/documents", s.importDocument)
 	mux.HandleFunc("POST /api/documents/resolve", s.resolveDocument)
@@ -104,6 +131,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/documents/{id}/note-images/{name}", s.getNoteImage)
 	mux.HandleFunc("POST /api/documents/{id}/metadata/lookup", s.lookupMetadata)
 	mux.HandleFunc("GET /api/processing", s.processingList)
+	mux.HandleFunc("POST /api/translate-selection", s.translateSelection)
+	mux.HandleFunc("GET /api/overviews", s.listOverviewStatuses)
+	mux.HandleFunc("GET /api/documents/{id}/overview", s.getDocumentOverview)
+	mux.HandleFunc("POST /api/documents/{id}/overview", s.requestDocumentOverview)
+	mux.HandleFunc("DELETE /api/documents/{id}/overview/job", s.cancelDocumentOverview)
 	mux.HandleFunc("POST /api/documents/{id}/processing", s.retryProcessing)
 	mux.HandleFunc("GET /api/documents/{id}/assistance", s.getAssistance)
 	mux.HandleFunc("POST /api/documents/{id}/assistance", s.setAssistance)
@@ -114,6 +146,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/documents/{id}/epub-chapters", s.epubChapters)
 	mux.HandleFunc("GET /api/documents/{id}/epub-chapter", s.epubChapterHTML)
 	mux.HandleFunc("GET /api/documents/{id}/translations", s.documentTranslations)
+	mux.HandleFunc("GET /api/documents/{id}/translations/export", s.exportTranslation)
+	mux.HandleFunc("POST /api/documents/{id}/translations/export", s.exportTranslation)
 	mux.HandleFunc("GET /api/documents/{id}/translations/stream", s.streamTranslations)
 	mux.HandleFunc("POST /api/documents/{id}/translations", s.requestTranslation)
 	mux.HandleFunc("PUT /api/documents/{id}/translations/{blockId}", s.updateTranslation)
@@ -140,7 +174,10 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(204)
 	}))
 	mux.HandleFunc("GET /api/documents/{id}/search", s.search)
+	mux.HandleFunc("GET /api/documents/{id}/text", s.documentText)
+	mux.HandleFunc("GET /api/search", s.librarySearch)
 	mux.HandleFunc("GET /api/documents/{id}/messages", s.messages)
+	mux.HandleFunc("GET /api/documents/{id}/messages/{message}/sources/{source}", s.validateChatEvidence)
 	mux.HandleFunc("POST /api/documents/{id}/chat", s.chat)
 	mux.HandleFunc("GET /api/providers", s.providers)
 	mux.HandleFunc("GET /api/documents/{id}/processing-usage", s.processingUsage)
@@ -167,6 +204,19 @@ func (s *Server) Handler() http.Handler {
 		if !decode(w, r, &v) {
 			return
 		}
+		if value, exists := v["documentContextTokens"]; exists {
+			n, ok := value.(float64)
+			if !ok || (n != 0 && n < 8192) || n > 1048576 || n != float64(int(n)) {
+				fail(w, 400, "文档上下文上限须为 0（自动）或 8192—1048576 的整数")
+				return
+			}
+		}
+		if value, exists := v["autoGenerateOverview"]; exists {
+			if _, ok := value.(bool); !ok {
+				fail(w, 400, "自动概要设置必须为布尔值")
+				return
+			}
+		}
 		if value, exists := v["autoTranslatePDF"]; exists {
 			if _, ok := value.(bool); !ok {
 				fail(w, 400, "自动翻译设置必须为布尔值")
@@ -184,6 +234,13 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
+		if value, exists := v["autoTranslateMaxPages"]; exists {
+			n, ok := value.(float64)
+			if !ok || n < 0 || n > 150 || n != float64(int(n)) || int(n)%10 != 0 {
+				fail(w, 400, "自动翻译页数须为 0—150 之间的 10 的整数倍")
+				return
+			}
+		}
 		b, _ := json.Marshal(v)
 		_, err := s.Store.DB.Exec("INSERT INTO settings VALUES('reader',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", string(b))
 		if err != nil {
@@ -196,7 +253,7 @@ func (s *Server) Handler() http.Handler {
 	if s.Web != "" {
 		mux.Handle("/", webAssets(s.Web))
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.diagnosticHTTP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.Host)
 		if err != nil {
 			host = r.Host
@@ -223,7 +280,7 @@ func (s *Server) Handler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
-	})
+	}))
 }
 
 // webAssets serves the built renderer. Chromium only runs an ES module or a
@@ -254,9 +311,9 @@ func webContentType(name string) string {
 	return ""
 }
 func (s *Server) importDocument(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 100<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes+(1<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		fail(w, 400, "文件超过 100 MB 或上传无效")
+		fail(w, 400, "文件超过 512 MB 或上传无效")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
@@ -304,6 +361,11 @@ func (s *Server) importDocument(w http.ResponseWriter, r *http.Request) {
 		fail(w, status, err.Error())
 		return
 	}
+	if status < 300 {
+		// Open windows reload the library when the revision changes, so files
+		// imported from the command line appear without a restart.
+		s.connectorRevision.Add(1)
+	}
 	respond(w, status, d)
 }
 
@@ -330,6 +392,15 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 	f, err := os.Open(temp)
 	if err != nil {
 		return failure(500, "无法验证文件")
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return failure(500, "无法验证文件大小")
+	}
+	if info.Size() > maxImportBytes {
+		f.Close()
+		return failure(400, "文件超过 512 MB")
 	}
 	hash := sha256.New()
 	size, err := io.Copy(hash, f)
@@ -364,11 +435,12 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 		if reason := paperLimit(kind, size, temp); reason != "" {
 			return failure(400, reason)
 		}
-		if pages, e := pdfPageCount(temp); e == nil && pages > largePaperPages && !allowLarge {
-			return Document{}, 409, importError{409, fmt.Sprintf("这份 PDF 有 %d 页，篇幅较大", pages), "large-paper", pages}
+		pages, _ := pdfPageCount(temp)
+		if (pages > largePaperPages || size > largePaperBytes) && !allowLarge {
+			return Document{}, 409, importError{409, "检测到 PDF 过大，请确认是否是论文？如果是图书类，请导入图书库。", "large-paper", pages}
 		}
 	}
-	d := Document{ID: docID, Type: kind, Title: strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename)), Size: size, CreatedAt: now(), LastOpenedAt: now(), Library: library}
+	d := Document{ID: docID, Type: kind, Title: strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename)), Size: size, CreatedAt: now(), LastOpenedAt: "", Library: library}
 	d.Category, d.CategorySource, d.ClassificationStatus, d.Tags, d.Folders = "article", "default", "pending", []string{}, []string{}
 	if kind == "pdf" && library == "books" {
 		// Classification reads parsed text, which books gain chapter by chapter.
@@ -442,6 +514,12 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 		p := initialDocumentProcessing(d, settings)
 		b, _ := json.Marshal(p)
 		_, err = tx.Exec("INSERT INTO document_processing(document_id,phase,status,body) VALUES(?,?,?,?)", d.ID, p.Phase, p.Status, b)
+		if err == nil {
+			err = queueImportedOverview(tx, d.ID, settings)
+		}
+	}
+	if err == nil {
+		_, err = tx.Exec("INSERT INTO document_corpus_jobs(document_id,status) VALUES(?,'queued')", d.ID)
 	}
 	if err == nil {
 		err = tx.Commit()
@@ -818,7 +896,9 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, out)
 }
 func (s *Store) saveMessage(m Message) error {
-	m.ID = id()
+	if m.ID == "" {
+		m.ID = id()
+	}
 	m.CreatedAt = now()
 	b, err := json.Marshal(m)
 	if err != nil {

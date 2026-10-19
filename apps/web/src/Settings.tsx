@@ -1,6 +1,9 @@
+import { AutoTranslationSettings } from "./papers/AutoTranslationSettings";
+import { TranslationPromptSettings } from "./TranslationPromptSettings";
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
+  FileText,
   Bot,
   Check,
   CircleCheck,
@@ -13,6 +16,8 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import { DiagnosticExport } from "./DiagnosticExport";
+import { CommandLineSettings } from "./CommandLineSettings";
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
 import { APIAgentForm, APIModelForm } from "./APIAgentForm";
@@ -24,9 +29,12 @@ import type {
   AgentModel,
   APIConnection,
   LibraryMode,
+  JournalRankConfig,
+  PaperColumn,
   Provider,
 } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
+import { Input } from "@reader/ui/components/input";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +62,7 @@ import {
   TabsTrigger,
 } from "@reader/ui/components/tabs";
 import { HighlightColorsEditor } from "./HighlightColorsEditor";
+import { ProxySettings } from "./ProxySettings";
 import {
   primaryLibraryMode,
   updateLibraryPreferences,
@@ -63,6 +72,8 @@ import { libraryModes } from "./LibraryModeSwitcher";
 import { Checkbox } from "@reader/ui/components/checkbox";
 import { Textarea } from "@reader/ui/components/textarea";
 import { toast } from "sonner";
+import { columnLabels, defaultColumns, toggleColumn } from "./papers/model";
+import { savePaperPreferences } from "./papers/actions";
 // Checks run automatically for this many API models; the rest on demand.
 const autoAPIChecks = 12;
 const translationGlossaryLimit = 4000;
@@ -119,18 +130,54 @@ export function Settings({
   const [apiModels, setAPIModels] = useState<AgentModel[]>([]);
   const [apiModelsError, setAPIModelsError] = useState("");
   const [apiDetails, setAPIDetails] = useState(false);
-  const [connector, setConnector] = useState<Awaited<
-    ReturnType<typeof api.connectorStatus>
-  > | null>(null);
+  const [probeWait, setProbeWait] = useState("");
+  const probeSeconds = Number(probeWait);
+  const validProbeWait =
+    Number.isInteger(probeSeconds) && probeSeconds >= 0 && probeSeconds <= 600;
+  const [journalRank, setJournalRank] = useState<JournalRankConfig | null>(
+    null,
+  );
+  const [journalKey, setJournalKey] = useState("");
+  const [journalSaving, setJournalSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let mounted = true;
+    void api
+      .journalRankConfig()
+      .then((config) => {
+        if (mounted) setJournalRank(config);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [open]);
+  const saveJournalRank = async (
+    patch: Partial<
+      Pick<JournalRankConfig, "enabled" | "filterMode" | "selected">
+    >,
+    key?: string,
+  ) => {
+    if (!journalRank) return;
+    setJournalSaving(true);
+    try {
+      const saved = await api.saveJournalRankConfig({
+        enabled: patch.enabled ?? journalRank.enabled,
+        filterMode: patch.filterMode ?? journalRank.filterMode,
+        selected: patch.selected ?? journalRank.selected,
+        ...(key !== undefined ? { key } : {}),
+      });
+      setJournalRank(saved);
+      setJournalKey("");
+      window.dispatchEvent(new Event("reader:journal-rank-config"));
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setJournalSaving(false);
+    }
+  };
   useEffect(() => {
     if (!open) setAPIDetails(false);
-  }, [open]);
-  useEffect(() => {
-    if (open)
-      void api
-        .connectorStatus()
-        .then(setConnector)
-        .catch(() => setConnector(null));
   }, [open]);
   const {
     theme,
@@ -148,10 +195,15 @@ export function Settings({
     id: string,
     first: "text" | "vision",
     snapshot: AIConfig,
+    timeoutSeconds?: number,
   ) => {
     const model = id.startsWith("api:") ? id.slice(4) : undefined;
     const run = (stage: "text" | "vision") =>
-      model ? api.testAI("api", stage, model) : api.testAI(id, stage);
+      model
+        ? timeoutSeconds
+          ? api.testAI("api", stage, model, timeoutSeconds)
+          : api.testAI("api", stage, model)
+        : api.testAI(id, stage);
     let stage = first;
     const update = (capability: AICapability) => {
       const current = useReaderStore.getState().aiConfig;
@@ -193,6 +245,7 @@ export function Settings({
     ids: string[],
     firstStage: (id: string) => "text" | "vision",
     snapshot: AIConfig,
+    timeoutSeconds?: number,
   ) => {
     setTesting((current) => {
       const next = new Map(current);
@@ -206,7 +259,9 @@ export function Settings({
         ),
       ),
     );
-    await Promise.all(ids.map((id) => check(id, firstStage(id), snapshot)));
+    await Promise.all(
+      ids.map((id) => check(id, firstStage(id), snapshot, timeoutSeconds)),
+    );
   };
   const warnWithoutVision = (models: AgentModel[]) => {
     const capabilities = useReaderStore.getState().aiConfig?.capabilities;
@@ -292,10 +347,40 @@ export function Settings({
   }, [open]);
   const checkModel = async (model: AgentModel) => {
     const snapshot = useReaderStore.getState().aiConfig;
-    if (!snapshot) return;
+    if (!snapshot || !validProbeWait) return;
     checked.current.add(JSON.stringify(["api", model.id]));
-    await checkAll([`api:${model.id}`], () => "text", snapshot);
+    await checkAll(
+      [`api:${model.id}`],
+      () => "text",
+      snapshot,
+      probeSeconds || undefined,
+    );
     warnWithoutVision(apiModels);
+  };
+  const checkTools = async (model: AgentModel) => {
+    const snapshot = useReaderStore.getState().aiConfig;
+    if (!snapshot) return;
+    setSaving(true);
+    try {
+      const capability = await api.testAI("api", "tools", model.id);
+      const current = useReaderStore.getState().aiConfig;
+      if (current && current.api.url === snapshot.api.url)
+        setAIConfig({
+          ...current,
+          capabilities: {
+            ...current.capabilities,
+            [`api:${model.id}`]: capability,
+          },
+        });
+      if (capability.tools !== "passed")
+        toast.error(
+          capability.toolError || "工具调用未通过，仍可使用检索辅助回答",
+        );
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setSaving(false);
+    }
   };
   const saveConfig = async (change: (latest: AIConfig) => AIConfig) => {
     setSaving(true);
@@ -303,23 +388,25 @@ export function Settings({
       setAIConfig(await api.saveAIConfig(change(await api.aiConfig())));
     } catch (e) {
       toast.error((e as Error).message);
-      return;
+      return false;
     } finally {
       setSaving(false);
     }
     await refresh();
+    return true;
   };
-  const saveAPI = (connection: APIConnection) => {
+  const saveAPI = async (connection: APIConnection) => {
     // A new address or key is a new connection: test its models again.
     for (const key of checked.current)
       if (key.startsWith('["api"')) checked.current.delete(key);
-    return saveConfig((latest) => ({ ...latest, api: connection }));
+    await saveConfig((latest) => ({ ...latest, api: connection }));
   };
-  const saveAPIModels = (change: (models: string[]) => string[]) =>
-    saveConfig((latest) => ({
+  const saveAPIModels = async (change: (models: string[]) => string[]) => {
+    await saveConfig((latest) => ({
       ...latest,
       apiModels: change(latest.apiModels ?? []),
     }));
+  };
   const checkStatus = (id: string, capability?: AICapability) => (
     <div className="flex flex-wrap gap-x-5">
       {(
@@ -446,7 +533,7 @@ export function Settings({
             )}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            Agent 连接、显示、阅读与论文库
+            Agent 连接、显示、阅读、诊断与论文库
           </DialogDescription>
         </DialogHeader>
         {apiDetails && (
@@ -463,14 +550,60 @@ export function Settings({
                 providers.some((p) => p.id === "api" && p.installed) && (
                   <div className="mt-6">
                     <h3 className="mb-1 text-sm font-medium">模型</h3>
+                    <label className="mb-1 flex items-center gap-3 text-xs text-muted-foreground">
+                      检测等待上限（秒）
+                      <Input
+                        type="number"
+                        min={0}
+                        max={600}
+                        step={1}
+                        value={probeWait}
+                        onChange={(event) => setProbeWait(event.target.value)}
+                        aria-label="检测等待上限（秒）"
+                        aria-describedby="api-probe-wait-help"
+                        aria-invalid={!validProbeWait}
+                        placeholder="默认"
+                        className="h-7 w-24"
+                      />
+                    </label>
+                    <p
+                      id="api-probe-wait-help"
+                      className="mb-3 text-xs text-muted-foreground"
+                    >
+                      仅用于手动检测，每阶段最多 600 秒；留空或 0 使用文本 45
+                      秒、图片 90 秒
+                    </p>
+                    {!validProbeWait && (
+                      <p className="mb-2 text-xs text-destructive" role="alert">
+                        请输入 0–600 的整数
+                      </p>
+                    )}
                     <ul className="api-model-list">
                       {apiModels.map((model) => {
                         const id = `api:${model.id}`;
                         const result = config.capabilities[id];
+                        const error =
+                          errors[`${id}:vision`] ||
+                          errors[`${id}:text`] ||
+                          result?.error;
+                        const retry = result || error;
+                        const timings = [
+                          !errors[`${id}:text`] &&
+                          result?.textFirstOutputMs != null
+                            ? `文本首输出 ${(result.textFirstOutputMs / 1000).toFixed(2)} s`
+                            : "",
+                          !errors[`${id}:text`] &&
+                          !errors[`${id}:vision`] &&
+                          result?.visionFirstOutputMs != null
+                            ? `图片首输出 ${(result.visionFirstOutputMs / 1000).toFixed(2)} s`
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ");
                         return (
                           <li
                             key={model.id}
-                            className="flex min-h-9 items-center gap-3"
+                            className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 py-1"
                           >
                             <span
                               className="min-w-0 flex-1 truncate text-sm"
@@ -478,18 +611,30 @@ export function Settings({
                             >
                               {model.name}
                             </span>
-                            {testing.has(id) ||
-                            result ||
-                            errors[`${id}:text`] ? (
-                              checkStatus(id, result)
-                            ) : (
+                            {(testing.has(id) || result || error) &&
+                              checkStatus(id, result)}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={
+                                saving || testing.has(id) || !validProbeWait
+                              }
+                              aria-label={`${retry ? "重新检测" : "检测"} ${model.id}`}
+                              onClick={() => void checkModel(model)}
+                            >
+                              {retry ? "重新检测" : "检测"}
+                            </Button>
+                            {result?.text && (
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                disabled={saving}
-                                onClick={() => void checkModel(model)}
+                                disabled={saving || testing.has(id)}
+                                onClick={() => void checkTools(model)}
+                                title={result.toolError}
                               >
-                                检测
+                                {result.tools === "passed"
+                                  ? "检索工具已通过"
+                                  : "检测检索工具"}
                               </Button>
                             )}
                             {model.custom && (
@@ -507,6 +652,16 @@ export function Settings({
                               >
                                 <X />
                               </Button>
+                            )}
+                            {!testing.has(id) && (timings || error) && (
+                              <div className="w-full break-words text-xs text-muted-foreground">
+                                {timings && (
+                                  <p title="本次首次收到思考或正文的耗时，不含模型列表加载，受网络和服务负载影响">
+                                    {timings}
+                                  </p>
+                                )}
+                                {error && <p>{error}</p>}
+                              </div>
                             )}
                           </li>
                         );
@@ -547,11 +702,34 @@ export function Settings({
               <Highlighter />
               阅读
             </TabsTrigger>
+            <TabsTrigger value="diagnostics">
+              <FileText />
+              诊断
+            </TabsTrigger>
             <TabsTrigger value="papers">
               <Library />
               论文库
             </TabsTrigger>
           </TabsList>
+          <TabsContent
+            value="diagnostics"
+            className="settings-panel"
+            keepMounted
+          >
+            {window.readerDesktop?.proxySettings && (
+              <div className="mb-6">
+                <ProxySettings open={open} />
+              </div>
+            )}
+            <section>
+              <h3 className="mb-3 text-sm font-medium">本地日志</h3>
+              <p className="mb-4 text-xs leading-5 text-muted-foreground">
+                导出全部已保留日志和运行环境供开发者排查。凭据、用户路径和翻译诊断中的正文会脱敏；不包含文档、聊天或批注。日志最多保留
+                7 天、100 MiB，仅在本机保存。
+              </p>
+              <DiagnosticExport />
+            </section>
+          </TabsContent>
           <TabsContent value="display" className="settings-panel" keepMounted>
             <section className="mb-6">
               <h3
@@ -651,8 +829,102 @@ export function Settings({
                 )}
               </div>
             </section>
+            <section className="mt-6">
+              <label
+                className="mb-2 block text-sm font-medium"
+                htmlFor="pdf-dark-image-mode"
+              >
+                PDF 深色图像处理
+              </label>
+              <Select
+                value={theme.pdfDarkImageMode ?? "adaptive"}
+                onValueChange={(value) => {
+                  if (
+                    value === "preserve" ||
+                    value === "invert" ||
+                    value === "adaptive"
+                  )
+                    setTheme({ pdfDarkImageMode: value });
+                }}
+              >
+                <SelectTrigger
+                  id="pdf-dark-image-mode"
+                  className="w-full max-w-sm"
+                >
+                  <SelectValue>
+                    {
+                      {
+                        preserve: "保持原色（透明底补白）",
+                        invert: "图片全部反色",
+                        adaptive: "自适应深色（处理图片白底）",
+                      }[theme.pdfDarkImageMode ?? "adaptive"]
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="adaptive">
+                    自适应深色（处理图片白底）
+                  </SelectItem>
+                  <SelectItem value="preserve">
+                    保持原色（透明底补白）
+                  </SelectItem>
+                  <SelectItem value="invert">图片全部反色</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="mt-2 text-xs text-muted-foreground">
+                扫描版页面也按此选项处理；文字颜色会保留色相并调整亮度。
+              </p>
+            </section>
           </TabsContent>
           <TabsContent value="reading" className="settings-panel" keepMounted>
+            <section className="mb-6 space-y-4">
+              <label className="block text-sm">
+                文档上下文上限（可选）
+                <Input
+                  className="mt-2 max-w-48"
+                  type="number"
+                  min={8192}
+                  max={1048576}
+                  step={1024}
+                  defaultValue={theme.documentContextTokens || ""}
+                  placeholder="自动获取"
+                  key={theme.documentContextTokens}
+                  onBlur={(e) => {
+                    const n = Number(e.currentTarget.value);
+                    if (
+                      Number.isInteger(n) &&
+                      (n === 0 || n >= 8192) &&
+                      n <= 1048576
+                    )
+                      setTheme({ documentContextTokens: n });
+                    else
+                      e.currentTarget.value = String(
+                        theme.documentContextTokens || "",
+                      );
+                  }}
+                />
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  优先读取模型信息或 Codex 配置；留空为自动，未知时采用
+                  64K。填写后只限制上限。
+                </span>
+              </label>
+            </section>
+            <section className="mb-6">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={theme.autoCopySelection === true}
+                  onCheckedChange={(checked) =>
+                    setTheme({ autoCopySelection: !!checked })
+                  }
+                />
+                <span>
+                  自动复制选中文字
+                  <span className="block text-xs text-muted-foreground">
+                    选中文字或点击高亮、划线等批注时，自动复制到剪贴板
+                  </span>
+                </span>
+              </label>
+            </section>
             <section className="mb-6">
               <label className="flex items-start gap-2 text-sm">
                 <Checkbox
@@ -662,9 +934,9 @@ export function Settings({
                   }
                 />
                 <span>
-                  译文原文划线关联
+                  原文译文悬停关联
                   <span className="block text-xs text-muted-foreground">
-                    悬停与批注同步到另一侧对应的完整句子
+                    悬停时提示另一侧对应的完整句子
                   </span>
                 </span>
               </label>
@@ -688,22 +960,7 @@ export function Settings({
           </TabsContent>
           <TabsContent value="papers" className="settings-panel" keepMounted>
             <section>
-              <h3 className="mb-3 text-sm font-medium">论文库</h3>
-              <div className="mb-5 rounded-md border p-3 text-sm">
-                <div className="font-medium">浏览器收录插件</div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  启动 Reader 后，Chrome 插件会自动连接本机论文库。
-                </p>
-                {connector && !connector.available && (
-                  <p
-                    className={`mt-2 text-xs ${connector.reason === "disabled" ? "text-muted-foreground" : "text-destructive"}`}
-                  >
-                    {connector.reason === "disabled"
-                      ? "开发模式未启用插件连接。"
-                      : "本机端口 17841 被占用，插件连接不可用。"}
-                  </p>
-                )}
-              </div>
+              <h3 className="mb-3 text-sm font-medium">导入设置</h3>
               <label className="flex items-start gap-2 text-sm">
                 <Checkbox
                   className="mt-0.5"
@@ -725,18 +982,177 @@ export function Settings({
               <label className="mt-4 flex items-start gap-2 text-sm">
                 <Checkbox
                   className="mt-0.5"
-                  checked={theme.autoTranslatePDF ?? true}
+                  checked={theme.autoGenerateOverview ?? false}
                   onCheckedChange={(checked) =>
-                    setTheme({ autoTranslatePDF: !!checked })
+                    setTheme({ autoGenerateOverview: !!checked })
                   }
                 />
                 <span>
-                  导入后自动翻译
+                  导入后生成文档概要
                   <span className="block text-xs text-muted-foreground">
-                    开启后，新导入的论文会自动翻译全文。
+                    使用已配置的文字模型，单独记录用量；已有文档按需生成。
                   </span>
                 </span>
               </label>
+              <AutoTranslationSettings theme={theme} setTheme={setTheme} />
+            </section>
+            <fieldset className="mt-7 border-t pt-5">
+              <legend className="text-sm font-medium">表格显示列</legend>
+              <p className="mb-3 text-xs text-muted-foreground">
+                标题始终显示。以下选择应用于论文库的表格视图。
+              </p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                {(Object.keys(columnLabels) as PaperColumn[]).map((column) => (
+                  <label
+                    key={column}
+                    htmlFor={`paper-column-${column}`}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <Checkbox
+                      id={`paper-column-${column}`}
+                      checked={(
+                        paperPreferences.columns ?? defaultColumns
+                      ).includes(column)}
+                      onCheckedChange={() =>
+                        void savePaperPreferences((prefs) => ({
+                          ...prefs,
+                          columns: toggleColumn(
+                            prefs.columns ?? defaultColumns,
+                            column,
+                          ),
+                        }))
+                      }
+                    />
+                    {columnLabels[column]}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <section className="mt-7 border-t pt-5">
+              <h3 className="mb-3 text-sm font-medium">期刊指标</h3>
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={journalRank?.enabled ?? true}
+                  disabled={!journalRank || journalSaving}
+                  onCheckedChange={(checked) =>
+                    void saveJournalRank({ enabled: !!checked })
+                  }
+                />
+                <span>
+                  在论文库显示 easyScholar 期刊指标
+                  <span className="block text-xs text-muted-foreground">
+                    默认开启；配置 SecretKey 后按论文出处查询。
+                  </span>
+                </span>
+              </label>
+              {journalRank?.enabled && (
+                <>
+                  <div className="mt-4 flex items-center gap-2">
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      aria-label="easyScholar SecretKey"
+                      placeholder={
+                        journalRank.hasKey
+                          ? "已保存 SecretKey；输入新密钥可替换"
+                          : "输入 easyScholar SecretKey"
+                      }
+                      value={journalKey}
+                      onChange={(event) => setJournalKey(event.target.value)}
+                    />
+                    <Button
+                      variant="outline"
+                      disabled={!journalKey.trim() || journalSaving}
+                      onClick={() =>
+                        void saveJournalRank({}, journalKey.trim())
+                      }
+                    >
+                      保存
+                    </Button>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-xs">
+                    <span id="journal-rank-filter-label">指标筛选</span>
+                    <Select
+                      value={journalRank.filterMode}
+                      onValueChange={(value) => {
+                        if (value !== "include" && value !== "exclude") return;
+                        void saveJournalRank({
+                          filterMode: value,
+                          selected:
+                            value === "include"
+                              ? journalRank.available.map((field) => field.key)
+                              : [],
+                        });
+                      }}
+                      disabled={journalSaving}
+                    >
+                      <SelectTrigger
+                        aria-labelledby="journal-rank-filter-label"
+                        className="w-48"
+                      >
+                        <SelectValue>
+                          {journalRank.filterMode === "include"
+                            ? "只显示选中的指标"
+                            : "隐藏选中的指标"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="include">
+                          只显示选中的指标
+                        </SelectItem>
+                        <SelectItem value="exclude">隐藏选中的指标</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {journalRank.filterMode === "include"
+                      ? "勾选要显示的指标。"
+                      : "勾选不想显示的指标。"}
+                    无数据或超出标题列宽度的标签会省略。
+                  </p>
+                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
+                    {journalRank.available.map((field) => (
+                      <label
+                        key={field.key}
+                        className="flex min-w-0 items-center gap-2 text-xs"
+                      >
+                        <Checkbox
+                          checked={journalRank.selected.includes(field.key)}
+                          disabled={journalSaving}
+                          onCheckedChange={(checked) =>
+                            void saveJournalRank({
+                              selected: checked
+                                ? [...journalRank.selected, field.key]
+                                : journalRank.selected.filter(
+                                    (value) => value !== field.key,
+                                  ),
+                            })
+                          }
+                        />
+                        <span className="truncate" title={field.name}>
+                          {field.name}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {journalRank.hasKey && (
+                    <Button
+                      className="mt-4"
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new Event("reader:journal-rank-refresh"),
+                        )
+                      }
+                    >
+                      <RefreshCw />
+                      刷新当前列表的期刊指标
+                    </Button>
+                  )}
+                </>
+              )}
             </section>
           </TabsContent>
           <TabsContent value="agent" className="settings-panel" keepMounted>
@@ -810,6 +1226,13 @@ export function Settings({
                       ? "只列出通过检测的模型：问答与翻译需通过文本推理，图片需通过图片理解。公式转换与主动图片提问使用图片模型。"
                       : "问答与翻译分别使用上方模型；未指定时，问答使用主力模型，翻译使用快速模型。公式转换与主动图片提问会向此 Agent 发送图片。"}
                   </p>
+                  <TranslationPromptSettings
+                    value={config.translationPrompt ?? ""}
+                    disabled={saving || aiModelSaving || testing.size > 0}
+                    onSave={(translationPrompt) =>
+                      saveConfig((latest) => ({ ...latest, translationPrompt }))
+                    }
+                  />
                 </div>
               )}
               <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
@@ -872,6 +1295,7 @@ export function Settings({
                 数据目录。发送的选区或章节会交给对应服务。
               </p>
             </section>
+            <CommandLineSettings open={open} />
           </TabsContent>
         </Tabs>
       </DialogContent>

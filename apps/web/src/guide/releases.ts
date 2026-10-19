@@ -1,3 +1,4 @@
+import bundledReleaseNotes from "../../../../docs/release-notes.json";
 import type { GuidePreferences } from "@reader/core";
 
 export interface ReleaseItem {
@@ -8,26 +9,10 @@ export interface ReleaseItem {
 }
 
 /**
- * Notes for important releases, keyed by the desktop package version. A
- * version without an entry updates silently.
+ * Notes keyed by the desktop package version. Versions without notes still
+ * show the update confirmation and GitHub feedback actions.
  */
-export const releaseNotes: Record<string, ReleaseItem[]> = {
-  "0.4.0": [
-    {
-      title: "新增指南",
-      body: "侧栏「关于」上方的「指南」演示了设置 Agent、选择模型、导入论文和阅读界面。",
-      topic: "agent",
-    },
-    {
-      title: "从 Zotero 导入",
-      body: "在「导入论文」中预览并迁移本机 Zotero 的 PDF、论文信息、分类、标签、笔记和可转换的批注。",
-    },
-    {
-      title: "从浏览器收录论文",
-      body: "安装 Reader Connector 后，可从论文页面收录 PDF，并选择 Reader 论文库中已有的分类和标签。",
-    },
-  ],
-};
+export const releaseNotes: Record<string, ReleaseItem[]> = bundledReleaseNotes;
 
 export type GuideLaunch =
   | { kind: "onboarding" }
@@ -48,10 +33,5 @@ export function guideLaunch(
     return preferences.onboarded
       ? { kind: "none" }
       : { kind: "none", save: { ...preferences, onboarded: true } };
-  const items = releaseNotes[version];
-  if (items?.length) return { kind: "release", items };
-  return {
-    kind: "none",
-    save: { ...preferences, onboarded: true, seenVersion: version },
-  };
+  return { kind: "release", items: releaseNotes[version] ?? [] };
 }

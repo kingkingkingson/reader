@@ -4,6 +4,7 @@ import { App } from "./App";
 import { installCloseFlush } from "./close-flush";
 import { AppCrash, ErrorBoundary } from "./ErrorBoundary";
 import "./style.css";
+import { installDiagnostics } from "./diagnostics";
 import { installScrollbars } from "./scrollbars";
 const removeScrollbars = installScrollbars(document);
 if (import.meta.hot) import.meta.hot.dispose(removeScrollbars);
@@ -16,6 +17,8 @@ if (token) {
   history.replaceState(null, "", location.pathname + location.search);
 }
 configureAPI(token);
+const removeDiagnostics = installDiagnostics(token);
+if (import.meta.hot) import.meta.hot.dispose(removeDiagnostics);
 const root = ReactDOM.createRoot(document.getElementById("root")!);
 if (import.meta.env.DEV && location.pathname === "/__streaming-benchmark") {
   void import("./chat/StreamingBenchmark").then(({ default: Benchmark }) =>
@@ -23,6 +26,10 @@ if (import.meta.env.DEV && location.pathname === "/__streaming-benchmark") {
   );
 } else if (import.meta.env.DEV && location.pathname === "/__streaming") {
   void import("./chat/StreamingPreview").then(({ default: Preview }) =>
+    root.render(<Preview />),
+  );
+} else if (import.meta.env.DEV && location.pathname === "/__link-preview") {
+  void import("./LinkPreviewDemo").then(({ default: Preview }) =>
     root.render(<Preview />),
   );
 } else if (import.meta.env.DEV && location.pathname === "/__formula-caption") {
