@@ -86,23 +86,6 @@ export function addToCategory(docs: Document[], name: string) {
   );
 }
 
-/** The open paper category, when the library itself is showing. */
-export function currentPaperFolder() {
-  if (useReaderStore.getState().active) return "";
-  const view = usePaperUI.getState().view;
-  return view.startsWith("folder:") ? view.slice(7) : "";
-}
-
-/** File newly imported papers into the category open when the import started. */
-export async function fileImportedPapers(
-  docs: Document[],
-  folder = currentPaperFolder(),
-) {
-  const papers = docs.filter((doc) => doc.library === "papers");
-  if (!folder || !papers.length) return "";
-  await addToCategory(papers, folder);
-  return categoryLeaf(folder);
-}
 export function removeFromCategory(docs: Document[], name: string) {
   return patchPapers(
     docs

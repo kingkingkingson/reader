@@ -167,7 +167,9 @@ export function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
+  // Imports land in the category or smart view open in the library itself.
   const currentPaperFolder = () => {
+    if (useReaderStore.getState().active) return "";
     const view = usePaperUI.getState().view;
     return currentMode() === "papers" &&
       (view.startsWith("folder:") || view.startsWith("smart:"))
