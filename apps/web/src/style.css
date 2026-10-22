@@ -667,6 +667,12 @@ kbd {
   gap: 12px;
   min-width: 0;
 }
+.reader-page-count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
 .toolbar-divider {
   height: 18px;
   width: 1px;

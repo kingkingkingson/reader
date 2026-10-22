@@ -1044,6 +1044,18 @@ export function Workspace({
             >
               <PanelLeft />
             </IconButton>
+            {doc.type === "pdf" && location?.type === "pdf" && (
+              <span
+                className="reader-page-count"
+                role="status"
+                aria-label="当前页数"
+              >
+                {location.page}
+                {adapter?.getPageCount?.()
+                  ? ` / ${adapter.getPageCount()}`
+                  : ""}
+              </span>
+            )}
           </div>
           <div className="toolbar-actions">
             {returnLocation && (
