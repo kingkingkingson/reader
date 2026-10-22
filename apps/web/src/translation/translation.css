@@ -84,15 +84,19 @@
 }
 .translation-document [data-label="doc_title"]:not([data-heading]) {
   font-size: 1.45em;
-  font-weight: 600;
+  font-weight: 700;
 }
 .translation-document [data-label="paragraph_title"]:not([data-heading]) {
   font-size: 1.15em;
-  font-weight: 600;
+  font-weight: 700;
   margin-top: 1.8em;
 }
+.translation-document [data-heading],
+.translation-document [data-heading] .translation-sentence,
+.translation-document [data-heading] .message-markdown {
+  font-weight: 700;
+}
 .translation-document [data-heading] {
-  font-weight: 640;
   line-height: 1.35;
   margin-bottom: 0.4em;
 }
@@ -110,13 +114,11 @@
 }
 .translation-document [data-heading="4"] {
   font-size: 1.05em;
-  font-weight: 600;
   margin-top: 1.15em;
 }
 .translation-document [data-heading="5"],
 .translation-document [data-heading="6"] {
   font-size: 1em;
-  font-weight: 600;
   margin-top: 1em;
 }
 .translation-sentence,
