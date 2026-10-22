@@ -2633,8 +2633,19 @@ kbd {
 .paper-list-pane {
   flex: 1;
   min-width: 0;
-  overflow-y: auto;
+  overflow: auto;
   padding: 8px 20px 24px;
+  /* Always show both bars; the table scrolls with the pane so the horizontal bar stays in view. */
+  scrollbar-color: rgb(128 128 128 / 55%) transparent;
+}
+.paper-list-pane::-webkit-scrollbar-thumb {
+  background-color: rgb(128 128 128 / 55%);
+}
+.paper-list-pane::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(128 128 128 / 75%);
+}
+.paper-table [data-slot="table-container"] {
+  overflow: visible;
 }
 .paper-batch-bar {
   position: sticky;
