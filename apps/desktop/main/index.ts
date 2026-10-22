@@ -455,7 +455,20 @@ app
       ipcMain.on("reader:flushed", handler);
     });
     // Let the renderer handle reading shortcuts; editable fields keep native undo.
-    window.webContents.on("before-input-event", (_event, input) => {
+    window.webContents.on("before-input-event", (event, input) => {
+      // Cmd/Ctrl+W closes the open reading tab instead of the window.
+      if (
+        input.type === "keyDown" &&
+        (input.meta || input.control) &&
+        !input.shift &&
+        !input.alt &&
+        !input.isComposing &&
+        input.key.toLowerCase() === "w"
+      ) {
+        event.preventDefault();
+        if (!input.isAutoRepeat) window?.webContents.send("reader:close-tab");
+        return;
+      }
       window?.webContents.setIgnoreMenuShortcuts(
         input.type === "keyDown" &&
           (annotationUndoShortcut({

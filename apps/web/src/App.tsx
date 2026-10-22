@@ -167,6 +167,18 @@ export function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
+  // Cmd/Ctrl+W closes the open reading tab; the library is never closed.
+  useEffect(
+    () =>
+      window.readerDesktop?.onCloseTab?.(() => {
+        const current = useReaderStore.getState().active;
+        if (!current) return;
+        void flushProgress()
+          .then(() => useReaderStore.getState().closeTab(current.id))
+          .catch((e) => toast.error(e.message));
+      }),
+    [],
+  );
   // Imports land in the category or smart view open in the library itself.
   const currentPaperFolder = () => {
     if (useReaderStore.getState().active) return "";

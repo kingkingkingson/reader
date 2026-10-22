@@ -89,6 +89,11 @@ contextBridge.exposeInMainWorld("readerDesktop", {
       .then((targets: unknown[]) => targets.forEach(callback));
     return () => ipcRenderer.removeListener("reader:open-link", listener);
   },
+  onCloseTab: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("reader:close-tab", listener);
+    return () => ipcRenderer.removeListener("reader:close-tab", listener);
+  },
   onLibraryChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on("reader:library-changed", listener);
