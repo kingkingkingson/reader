@@ -47,7 +47,25 @@ func libraryDir(flagValue string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(config, "Reader", "library"), nil
+	return desktopLibraryDir(filepath.Join(config, "Reader"))
+}
+
+// The desktop keeps this pointer outside the library so it survives relocation.
+func desktopLibraryDir(userData string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(userData, "library-location.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Join(userData, "library"), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var location struct {
+		Directory string `json:"directory"`
+	}
+	if err := json.Unmarshal(data, &location); err != nil || !filepath.IsAbs(location.Directory) {
+		return "", errors.New("保存的书库位置无效，请检查 library-location.json")
+	}
+	return location.Directory, nil
 }
 
 type client struct {

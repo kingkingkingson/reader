@@ -21,6 +21,8 @@ func TestMain(m *testing.M) {
 			runChatSessionProcess()
 		case "document-conversation":
 			runPersistentDocumentProcess()
+		case "codex-handoff":
+			runCodexHandoffProcess()
 		case "document-reading":
 			runDocumentReadingProcess()
 		case "corpus-worker":

@@ -36,7 +36,13 @@ func (a apiAdapter) Stream(ctx context.Context, req GenerateRequest, emit func(P
 				}
 			}
 		}
+		if req.Input.Chat.SessionID != "" {
+			return streamPiChat(ctx, a.config, completion, req.Input, emit)
+		}
 		return streamAPIDocumentChat(ctx, a.config, completion, req.Input, emit)
+	}
+	if req.Input.Chat != nil && req.Input.Chat.SessionID != "" {
+		return streamPiChat(ctx, a.config, completionRequest{Model: a.config.Model}, req.Input, emit)
 	}
 	return streamCompletion(ctx, a.config, completionRequest{Model: a.config.Model}, req.Input, emit)
 }

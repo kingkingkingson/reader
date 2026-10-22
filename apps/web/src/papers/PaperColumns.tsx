@@ -194,9 +194,7 @@ export function PaperColumns({
               <Checkbox
                 aria-label={`显示${tableColumnLabel(column)}列`}
                 checked={controls.visible.includes(column)}
-                disabled={column === "title"}
                 onCheckedChange={(checked) => {
-                  if (column === "title") return;
                   void savePaperPreferences((current) => {
                     const shown = new Set(visibleColumns(current));
                     if (checked) shown.add(column);
@@ -204,6 +202,7 @@ export function PaperColumns({
                     return {
                       ...current,
                       columnOrder: columnOrder(current),
+                      ...(column === "title" ? { showTitle: !!checked } : {}),
                       columns: columnOrder(current).filter(
                         (c): c is PaperColumn => c !== "title" && shown.has(c),
                       ),

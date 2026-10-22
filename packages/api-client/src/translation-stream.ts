@@ -9,7 +9,7 @@ function isBlock(value: unknown): value is TranslationBlock {
   return (
     typeof b.blockId === "string" &&
     typeof b.sourceHash === "string" &&
-    ["pending", "running", "complete", "failed"].includes(b.status) &&
+    ["idle", "pending", "running", "complete", "failed"].includes(b.status) &&
     Array.isArray(b.sentences) &&
     b.sentences.every(
       (s) => s && typeof s.source === "string" && typeof s.target === "string",

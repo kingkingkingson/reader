@@ -131,13 +131,17 @@ func TestTranslationFailureKeepsChatCapability(t *testing.T) {
 	if err := s.writeAIConfig(c); err != nil {
 		t.Fatal(err)
 	}
-	s.taskGenerationService(c, taskTranslation).attemptFailed("claude", false, errors.New("unknown model"))
-	if !capable(s.aiConfig(), "claude", false) {
-		t.Fatal("translation failure disabled chat")
-	}
-	s.taskGenerationService(c, taskChat).attemptFailed("claude", false, errors.New("unknown model"))
-	if capable(s.aiConfig(), "claude", false) {
-		t.Fatal("chat failure was not recorded")
+	for _, task := range []modelTask{taskTranslation, taskChat} {
+		service := s.taskGenerationService(c, task)
+		connection := service.connections["claude"]
+		connection.Adapter = adapterFunc(func(context.Context, GenerateRequest, func(ProviderEvent) error) (GenerateResult, error) {
+			return GenerateResult{}, errors.New("unknown model")
+		})
+		service.connections["claude"] = connection
+		_, _ = service.Generate(t.Context(), AIInput{Prompt: "test"}, false, nil)
+		if !capable(s.aiConfig(), "claude", false) {
+			t.Fatalf("%s runtime failure disabled verified chat capability", task)
+		}
 	}
 }
 

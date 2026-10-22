@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"rsc.io/pdf"
 )
@@ -20,6 +22,55 @@ const (
 )
 
 func validLibrary(library string) bool { return library == "books" || library == "papers" }
+
+func validImportFolder(folder string) bool {
+	if utf8.RuneCountInString(folder) > 40 || strings.ContainsFunc(folder, unicode.IsControl) {
+		return false
+	}
+	for _, part := range strings.Split(folder, "/") {
+		if part == "" || part != strings.TrimSpace(part) {
+			return false
+		}
+	}
+	return true
+}
+
+// Resolve smart category rules on the server so imports use the saved tags.
+// The returned tags are inserted in the same transaction as a new document.
+func (s *Server) importCategoryTags(library, folder, smartID string) ([]string, error) {
+	if (folder != "" || smartID != "") && library != "papers" ||
+		folder != "" && (!validImportFolder(folder) || smartID != "") {
+		return nil, errors.New("目标分类无效")
+	}
+	if smartID == "" {
+		return []string{}, nil
+	}
+	var raw string
+	if err := s.Store.DB.QueryRow("SELECT value FROM settings WHERE key='preferences:library'").Scan(&raw); err != nil {
+		return nil, errors.New("无法读取智能标签分类，请重新选择")
+	}
+	var prefs struct {
+		Papers struct {
+			SmartCategories []struct {
+				ID   string          `json:"id"`
+				Tags json.RawMessage `json:"tags"`
+			} `json:"smartCategories"`
+		} `json:"papers"`
+	}
+	if json.Unmarshal([]byte(raw), &prefs) == nil {
+		for _, category := range prefs.Papers.SmartCategories {
+			if category.ID != smartID {
+				continue
+			}
+			tags, err := normalizeTags(category.Tags)
+			if err != nil || len(tags) == 0 {
+				return nil, errors.New("智能标签分类的标签无效，请重新设置")
+			}
+			return tags, nil
+		}
+	}
+	return nil, errors.New("智能标签分类已不存在，请重新选择")
+}
 
 // pdfPageCount reads the page tree without rendering. Malformed or unsupported
 // encrypted files report an error instead of a guess.

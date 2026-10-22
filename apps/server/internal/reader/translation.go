@@ -146,6 +146,9 @@ func (s *Server) saveTranslation(documentID string, t TranslationBlock) error {
 	if _, err = tx.Exec(`INSERT INTO translations(document_id,block_id,source_hash,status,body) VALUES(?,?,?,?,?) ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET status=excluded.status,body=excluded.body`, documentID, t.BlockID, t.SourceHash, t.Status, string(body)); err != nil {
 		return err
 	}
+	if _, err = tx.Exec("INSERT INTO annotation_recovery(document_id,checked) VALUES(?,0) ON CONFLICT(document_id) DO UPDATE SET checked=0", documentID); err != nil {
+		return err
+	}
 	visible := t
 	if t.Status == "complete" {
 		_, err = tx.Exec("DELETE FROM translation_previous WHERE document_id=? AND block_id=? AND source_hash=?", documentID, t.BlockID, t.SourceHash)

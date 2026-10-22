@@ -102,6 +102,8 @@ func providerFailure(ctx context.Context, c APIConnection, status int, header ht
 		kind = ErrorModel
 	case 402:
 		kind = ErrorBilling
+	case 408, 504:
+		kind = ErrorTimeout
 	case 413:
 		kind = ErrorContext
 	case 429:
@@ -191,7 +193,7 @@ func providerFailure(ctx context.Context, c APIConnection, status int, header ht
 		}
 		t.Stage = stage
 	}
-	label := map[ErrorKind]string{ErrorConfiguration: "上游拒绝请求参数", ErrorAuthentication: "API 身份验证失败", ErrorPermission: "API 权限不足", ErrorModel: "API 模型或接口不存在或不可访问", ErrorBilling: "API 余额或配额不足", ErrorContext: "请求超过上下文或大小限制", ErrorContent: "上游内容策略拒绝请求", ErrorLimit: "API 限流或用量受限", ErrorUpstream: "上游请求失败，未能确定具体原因"}[kind]
+	label := map[ErrorKind]string{ErrorConfiguration: "上游拒绝请求参数", ErrorAuthentication: "API 身份验证失败", ErrorPermission: "API 权限不足", ErrorModel: "API 模型或接口不存在或不可访问", ErrorBilling: "API 余额或配额不足", ErrorContext: "请求超过上下文或大小限制", ErrorContent: "上游内容策略拒绝请求", ErrorLimit: "API 限流或用量受限", ErrorUpstream: "上游请求失败，未能确定具体原因", ErrorTimeout: "上游请求超时"}[kind]
 	if param != "" {
 		label += "（参数：" + param + "）"
 	}

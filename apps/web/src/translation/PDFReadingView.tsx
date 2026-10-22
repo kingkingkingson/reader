@@ -332,11 +332,13 @@ export function PDFReadingView({
       (b) => !isPDFPageDecoration(b),
     );
     const linked =
-      location.translation?.blockId ?? location.sentenceLink?.parts[0]?.blockId;
+      location.translation?.blockId ??
+      location.sourceAnchors?.[0]?.blockId ??
+      location.sentenceLink?.parts[0]?.blockId;
     const page = readable.filter((b) => b.page === location.page);
     // Saved selections carry rects rather than x/y; the first marked line
     // decides the paragraph, never the page origin.
-    const rect = location.rects?.[0];
+    const rect = location.rects?.[0] ?? location.sourceAnchors?.[0]?.bounds;
     const covering =
       rect &&
       page
@@ -1061,11 +1063,6 @@ export function PDFReadingView({
                     {doc.library === "books"
                       ? "尚未翻译任何章节，可在工具栏翻译本章。"
                       : "正文仍在解析中，完成的段落会在这里显示。"}
-                  </p>
-                )}
-                {processing?.incomplete && (
-                  <p className="translation-warning">
-                    部分页面没有可提取文字，需要 OCR；当前译文不完整。
                   </p>
                 )}
                 {visibleBlocks.map((block) => {

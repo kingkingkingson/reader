@@ -253,7 +253,7 @@ func (s *Server) importZoteroEntryTo(ctx context.Context, e *zoteroEntry, librar
 		if library == "papers" && !allowLarge && (pages > largePaperPages || size > largePaperBytes) {
 			return result, importError{409, "检测到 PDF 过大，请确认是否是论文？如果是图书类，请导入图书库。", "large-paper", pages}
 		}
-		d = Document{ID: docID, Type: "pdf", Library: library, Title: e.Title, Size: size, CreatedAt: zoteroDate(e.added), LastOpenedAt: "", Tags: []string{}, Folders: []string{}}
+		d = Document{ID: docID, Type: "pdf", Library: library, Title: zoteroStripBraces(e.Title), Size: size, CreatedAt: zoteroDate(e.added), LastOpenedAt: "", Tags: []string{}, Folders: []string{}}
 		result.Status = "imported"
 	} else {
 		result.Status = "merged"
@@ -453,6 +453,9 @@ func zoteroMetadata(e *zoteroEntry) (PaperMetadata, []string) {
 		if key == "date" {
 			value = zoteroMetadataDate(value.(string))
 		}
+		if key == "shortTitle" {
+			value = zoteroStripBraces(value.(string))
+		}
 		raw, _ := json.Marshal(value)
 		normal, err := normalizeMetadataField(key, raw)
 		if err != nil {
@@ -462,6 +465,34 @@ func zoteroMetadata(e *zoteroEntry) (PaperMetadata, []string) {
 		result.set(key, normal, "manual")
 	}
 	return result, warnings
+}
+
+// zoteroStripBraces removes BibTeX case-protection braces, keeping their
+// content. Values containing a backslash or unbalanced braces are returned
+// unchanged so escapes and LaTeX commands are never broken.
+func zoteroStripBraces(value string) string {
+	if !strings.ContainsAny(value, "{}") || strings.Contains(value, `\`) {
+		return value
+	}
+	depth := 0
+	var b strings.Builder
+	for _, r := range value {
+		switch r {
+		case '{':
+			depth++
+		case '}':
+			if depth == 0 {
+				return value
+			}
+			depth--
+		default:
+			b.WriteRune(r)
+		}
+	}
+	if depth != 0 {
+		return value
+	}
+	return b.String()
 }
 
 // Zotero SQL dates may start with a sortable YYYY-MM-DD prefix, where 00

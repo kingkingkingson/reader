@@ -252,3 +252,26 @@ READER_TEST_STREAM_PROVIDER=kimi go test ./internal/reader -run '^TestLiveAgentS
 [OpenAPI](./openapi.yaml) 的 `ChatStreamEvent` 描述原有五事件与可选 `activity` 扩展；`text/event-stream` 实际仍是 SSE 文本，没有 JSON envelope。生成类型位于 `packages/api-client/src/schema.d.ts`。可共用 [v1 fixtures](./fixtures/agent-streaming-v1.json)，覆盖成功、文档工具状态、备用、部分失败和无终态断流。`TestFrozenStreamFixtures` 通过实际 writer 回放，检查事件形状、正文追加及终态后拒绝事件；前端使用相同文档工具 fixture 验证状态不混入正文。
 
 本轮真实 CLI 的版本、文字/合成图片首段与完成时间、取消结果及未验证项，以 [后端进度](./implementation/backend-streaming-progress.md) 为准。上文原有历史实测仅描述先前基线。Claude 未登录、商业备用 API 实测、合并前端后的真实人工验收仍待完成；模拟协议和 HTTP gated 测试不替代这些验收。
+
+## Side chat sessions 与 pi · #128
+
+侧栏会话以 `chat_sessions.id` 为稳定身份，`documentId` 只是文档关联。同一文档可新建、重命名和切换会话。后端统一在设置中选择自有 API Agent（pi）、Codex、Claude Code 或 Kimi；侧栏仅管理会话，不提供后端选择器。各会话的新消息和重新生成使用当前全局选择，session 的 provider 元数据不覆盖设置。模型及 Effort 仍复用对应后端的偏好，开始运行时冻结配置；修改设置不改变已开始的请求。会话不是工作目录，也没有新增终端、写文件、RAG 或 Memory 工具。
+
+首次访问会话列表时，将旧消息的 JSON 增补 `sessionId`，原消息 ID、引用、附件、阅读位置与批注关联保持不变，旧 provider continuation 一起迁入默认会话。迁移有事务保护并可重复执行。旧 `/messages` 和 `/chat` 客户端在文档迁移后指向默认会话，保留 SSE 形态；未迁移文档的旧端点保留兼容实现。新侧栏使用显式会话接口。
+
+- `GET/POST /api/documents/{id}/chat-sessions`：列表和创建；列表包含最新运行状态。
+- `PATCH .../chat-sessions/{session}`：名称或后端；运行中禁止切换后端。
+- `GET .../{session}/messages`：只读取该会话的消息。
+- `POST .../{session}/chat`：验证并保存用户问题、记录运行后返回 `202 ChatRun`。
+- `GET .../{session}/runs/{run}/events`：从头回放，再订阅同一运行，使用已有 SSE 事件契约。
+- `POST .../{session}/runs/{run}/cancel`：只取消该运行，等待退出和保存状态核对。
+
+运行由 Go 服务管理，不依赖发起 POST 或订阅 SSE 的连接。最多同时运行四个会话，每个会话同时只运行一次；超过上限返回 429，同会话重复运行返回 409，均不保存新问题。切换文档、会话、侧栏或断开事件连接不会取消运行。前端按 session 保存独立的消息、思考、候选文本和取消状态，重新进入会话时查询服务端并订阅现有 run，不自动重新 POST。停止应用会取消并等待所有文档任务；重新打开时把残留 running 记录核对为已完成或已中断，由用户显式继续未回答的问题。
+
+自有 Agent 通过 `apps/agent` 的 pi SDK worker 执行模型与工具循环。Go 用私有临时目录启动进程，通过版本化 JSONL stdio 传入配置、已接受的 pi entries 和允许的工具清单；密钥不放入命令行。worker 使用内存凭据、内存 SessionManager 和显式 ResourceLoader，不发现用户 pi 配置、skills、extensions、AGENTS.md 或默认 shell/文件工具。读取工具仍在 Go 中绑定当前文档、版本、权限、预算和审计。API 连接与推理强度规则沿用 Reader，禁止跨源请求和跟随重定向；CLI 后端继续使用自身协议与登录。
+
+每次运行使用独立 worker；Codex 同样使用独立运行缓存，已提交的原生 thread 可在下一轮恢复。pi 的 `prompt` 完成且 `waitForIdle` 收敛、worker 正常退出、最终答案通过来源校验后，Go 才在同一事务提交答案和 continuation。缺少正常终态、取消、超时、伪造引用或保存失败都不覆盖此前的 continuation。`done` 只在答案持久化后发送。运行事件也存入 SQLite，便于重新订阅已结束的 run；临时草稿不作为成功 assistant 消息保存。
+
+pi 原生 entries 保留工具调用配对、推理协议字段及压缩记录。历史图片二进制不重复写入数据库，而以明确提示替换；下一轮需要图片细节时必须重新读取页面，手动附件需再次提供。最终正文、当前候选正文、思考各限制 1 MiB；运行事件最多 8 MiB，接受的 native entries 最多 32 MiB，超过限制明确失败并保留之前的历史。
+
+后台翻译、概要、分类和公式处理继续使用既有链路。自有 Agent 仍按已有能力检测结果选择工具或预检索；本次没有扩充模型检测/登录协议。安装包通过现有 Electron 的 Node 模式运行 worker，不要求用户安装 Node。打包 smoke 在移动后的资源目录验证 pi 的模型流、工具往返和 entries，防止依赖意外从开发 checkout 解析。

@@ -142,3 +142,28 @@ it("shows readable citation labels in a stream and only links saved known source
   expect(navigate).toHaveBeenCalledExactlyOnceWith("S64");
   expect(host.querySelector("code")?.textContent).toBe("citeS64");
 });
+
+it.each(["【S64】", "［S64］", "（S64、S65）", "(S64, S65)", "[S64; S65]"])(
+  "links only validated IDs in multilingual source labels: %s",
+  async (label) => {
+    const navigate = vi.fn();
+    await act(async () =>
+      root.render(
+        <ChatCitationNavigation.Provider
+          value={{ sourceIds: ["S64"], navigate }}
+        >
+          <MessageMarkdown
+            content={`依据原文 ${label}，代码保留原样：\`${label}\``}
+          />
+        </ChatCitationNavigation.Provider>,
+      ),
+    );
+    const links = host.querySelectorAll<HTMLAnchorElement>(
+      'a[href^="#reader-evidence?"]',
+    );
+    expect(links).toHaveLength(1);
+    links[0].click();
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("S64");
+    expect(host.querySelector("code")?.textContent).toBe(label);
+  },
+);

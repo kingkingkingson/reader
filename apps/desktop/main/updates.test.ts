@@ -9,21 +9,16 @@ import {
   selectRelease,
 } from "./updates";
 function release(version = "0.2.0") {
-  return {
-    tag_name: `v${version}`,
-    draft: false,
-    prerelease: false,
-    assets: [
-      `Reader-${version}-mac-arm64.dmg`,
-      `Reader-${version}-win-x64.exe`,
-      "SHA256SUMS.txt",
-    ].map((name) => ({
-      name,
-      state: "uploaded",
-      browser_download_url: `https://github.com/cynicalight/reader/releases/download/v${version}/${name}`,
-    })),
-  };
+  // GitHub's public /releases/latest JSON contains a tag, not REST assets.
+  return { tag_name: `v${version}` };
 }
+function checksums(...files: string[]) {
+  return files.map((name) => `${"a".repeat(64)}  ${name}`).join("\n");
+}
+const manifest = checksums(
+  "Reader-0.2.0-mac-arm64.dmg",
+  "Reader-0.2.0-win-x64.exe",
+);
 describe("release boundaries", () => {
   it("compares versions numerically and never downgrades", () => {
     expect(newerRelease("v0.10.0", "0.9.0")).toBe(true);
@@ -32,88 +27,119 @@ describe("release boundaries", () => {
     expect(newerRelease("v0.2.0", "1.0.0")).toBe(false);
     expect(() => newerRelease("garbage", "0.1.0")).toThrow();
   });
-  it("requires stable releases and official matching assets", () => {
-    expect(selectRelease(release(), "0.1.0", "darwin", "arm64").status).toBe(
-      "available",
-    );
-    expect(selectRelease(release(), "0.2.0", "darwin", "arm64").status).toBe(
-      "current",
-    );
+  it.each([
+    null,
+    {},
+    { tag_name: 2 },
+    release("0.2.0-beta.1"),
+    release("../0.2.0"),
+    release("00.2.0"),
+    { ...release(), prerelease: true },
+    { ...release(), draft: true },
+  ])("rejects invalid or non-stable release metadata: %j", (value) => {
     expect(() =>
-      selectRelease(
-        { ...release(), prerelease: true },
-        "0.1.0",
-        "darwin",
-        "arm64",
-      ),
+      selectRelease(value, "0.1.0", "darwin", "arm64", manifest),
     ).toThrow();
-    expect(selectRelease(release(), "0.1.0", "darwin", "x64").status).toBe(
-      "pending",
-    );
-    const bad = release();
-    bad.assets[0].browser_download_url = "https://example.com/payload.dmg";
-    expect(() => selectRelease(bad, "0.1.0", "darwin", "arm64")).toThrow();
   });
-  it("selects the installer for the running platform", () => {
-    const mac = selectRelease(release(), "0.1.0", "darwin", "arm64");
-    const windows = selectRelease(release(), "0.1.0", "win32", "x64");
+  it("selects only the running platform's official installer", () => {
+    const mac = selectRelease(release(), "0.1.0", "darwin", "arm64", manifest);
+    const windows = selectRelease(release(), "0.1.0", "win32", "x64", manifest);
     expect(mac.status === "available" && mac.update.installer).toBe(
       "Reader-0.2.0-mac-arm64.dmg",
     );
-    expect(windows.status === "available" && windows.update).toMatchObject({
+    expect(windows.status === "available" && windows.update).toEqual({
+      version: "0.2.0",
       installer: "Reader-0.2.0-win-x64.exe",
       downloadURL:
         "https://github.com/cynicalight/reader/releases/download/v0.2.0/Reader-0.2.0-win-x64.exe",
+      checksumURL:
+        "https://github.com/cynicalight/reader/releases/download/v0.2.0/SHA256SUMS.txt",
     });
-    expect(() => selectRelease(release(), "0.1.0", "win32", "arm64")).toThrow();
-    expect(() => selectRelease(release(), "0.1.0", "linux", "x64")).toThrow();
+    expect(
+      selectRelease(release(), "0.1.0", "darwin", "x64", manifest).status,
+    ).toBe("pending");
+    expect(() =>
+      selectRelease(release(), "0.1.0", "win32", "arm64", manifest),
+    ).toThrow();
+    expect(() =>
+      selectRelease(release(), "0.1.0", "linux", "x64", manifest),
+    ).toThrow();
   });
-  it("offers the Mac update archive only when the release has one", () => {
-    const withArchive = release();
-    withArchive.assets.push({
-      name: "Reader-0.2.0-mac-arm64.zip",
-      state: "uploaded",
-      browser_download_url:
-        "https://github.com/cynicalight/reader/releases/download/v0.2.0/Reader-0.2.0-mac-arm64.zip",
-    });
-    const mac = selectRelease(withArchive, "0.1.0", "darwin", "arm64");
+  it("offers a Mac archive only when listed and never mixes architectures", () => {
+    const withArchive =
+      manifest +
+      "\n" +
+      checksums(
+        "Reader-0.2.0-mac-arm64.zip",
+        "Reader-0.2.0-mac-intel-x64.dmg",
+        "Reader-0.2.0-mac-intel-x64.zip",
+      );
+    const mac = selectRelease(
+      release(),
+      "0.1.0",
+      "darwin",
+      "arm64",
+      withArchive,
+    );
     expect(mac.status === "available" && mac.update.archive).toEqual({
       installer: "Reader-0.2.0-mac-arm64.zip",
       downloadURL:
         "https://github.com/cynicalight/reader/releases/download/v0.2.0/Reader-0.2.0-mac-arm64.zip",
     });
-    const windows = selectRelease(withArchive, "0.1.0", "win32", "x64");
-    expect(windows.status === "available" && windows.update.archive).toBe(
-      undefined,
+    const intel = selectRelease(
+      release(),
+      "0.1.0",
+      "darwin",
+      "x64",
+      withArchive,
     );
-    const old = selectRelease(release(), "0.1.0", "darwin", "arm64");
-    expect(old.status === "available" && old.update.archive).toBe(undefined);
-    withArchive.assets[3].browser_download_url = "https://example.com/x.zip";
-    expect(() =>
-      selectRelease(withArchive, "0.1.0", "darwin", "arm64"),
-    ).toThrow();
-  });
-  it("selects Intel installers and archives without using Apple Silicon assets", () => {
-    const intel = release();
-    for (const ext of ["dmg", "zip"]) {
-      const name = `Reader-0.2.0-mac-intel-x64.${ext}`;
-      intel.assets.push({
-        name,
-        state: "uploaded",
-        browser_download_url: `https://github.com/cynicalight/reader/releases/download/v0.2.0/${name}`,
-      });
-    }
-    const result = selectRelease(intel, "0.1.0", "darwin", "x64");
-    expect(result.status === "available" && result.update).toMatchObject({
+    expect(intel.status === "available" && intel.update).toMatchObject({
       installer: "Reader-0.2.0-mac-intel-x64.dmg",
       archive: { installer: "Reader-0.2.0-mac-intel-x64.zip" },
     });
-  });
-  it("retries a release whose build assets are not ready", () => {
+    const windows = selectRelease(
+      release(),
+      "0.1.0",
+      "win32",
+      "x64",
+      withArchive,
+    );
     expect(
-      selectRelease({ ...release(), assets: [] }, "0.1.0", "darwin", "arm64")
-        .status,
-    ).toBe("pending");
+      windows.status === "available" && windows.update.archive,
+    ).toBeUndefined();
+    const old = selectRelease(release(), "0.1.0", "darwin", "arm64", manifest);
+    expect(old.status === "available" && old.update.archive).toBeUndefined();
+  });
+  it("waits for the manifest and matching version's installer", () => {
+    for (const text of [
+      "",
+      checksums("Reader-0.1.0-mac-arm64.dmg"),
+      checksums("https://example.com/payload.dmg"),
+    ])
+      expect(
+        selectRelease(release(), "0.1.0", "darwin", "arm64", text),
+      ).toEqual({ status: "pending" });
+  });
+  it.each([
+    "<html>proxy error</html>",
+    "invalid  Reader-0.2.0-mac-arm64.dmg",
+    manifest + "\n" + manifest,
+    " ".repeat(65537),
+  ])("rejects malformed, duplicate or oversized manifests", (text) => {
+    expect(() =>
+      selectRelease(release(), "0.1.0", "darwin", "arm64", text),
+    ).toThrow();
+  });
+  it("accepts the release script's trailing newline and CRLF", () => {
+    expect(
+      selectRelease(
+        release(),
+        "0.1.0",
+        "darwin",
+        "arm64",
+        manifest.replaceAll("\n", "\r\n") + "\r\n",
+      ).status,
+    ).toBe("available");
   });
   it("requires exactly one matching SHA256", () => {
     const hash = "a".repeat(64);
@@ -134,7 +160,10 @@ describe("daily scheduling", () => {
   it("coalesces simultaneous checks and persists successful completion", async () => {
     const state = {};
     const save = vi.fn().mockResolvedValue(undefined);
-    const fetch = vi.fn().mockResolvedValue(Response.json(release()));
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(release()))
+      .mockResolvedValueOnce(new Response(manifest));
     const checker = new DailyUpdateChecker({
       version: "0.1.0",
       platform: "darwin",
@@ -144,8 +173,24 @@ describe("daily scheduling", () => {
       fetch,
       now: () => day,
     });
-    await Promise.all([checker.check(), checker.check()]);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    const results = await Promise.all([checker.check(), checker.check()]);
+    expect(results[0].status).toBe("available");
+    expect(results[1]).toEqual(results[0]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "https://github.com/cynicalight/reader/releases/latest",
+      expect.objectContaining({
+        headers: { Accept: "application/json" },
+        redirect: "follow",
+        credentials: "omit",
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "https://github.com/cynicalight/reader/releases/download/v0.2.0/SHA256SUMS.txt",
+      expect.objectContaining({ redirect: "follow", credentials: "omit" }),
+    );
     expect(state).toEqual({ lastAttempt: day, lastChecked: day });
     expect(checker.isDue()).toBe(false);
   });
@@ -163,10 +208,84 @@ describe("daily scheduling", () => {
     });
     await expect(checker.check()).rejects.toThrow("503");
     expect(state).toEqual({ lastAttempt: day });
-    fetch.mockResolvedValue(Response.json({ ...release(), assets: [] }));
+    fetch
+      .mockResolvedValueOnce(Response.json(release()))
+      .mockResolvedValueOnce(new Response("", { status: 404 }));
     expect((await checker.check()).status).toBe("pending");
     expect(state).toEqual({ lastAttempt: day });
   });
+});
+
+describe("public release discovery", () => {
+  it.each(["0.2.0", "1.0.0"])(
+    "does not fetch a manifest or downgrade version %s",
+    async (version) => {
+      const fetch = vi.fn().mockResolvedValue(Response.json(release()));
+      const checker = new DailyUpdateChecker({
+        version,
+        platform: "darwin",
+        arch: "arm64",
+        state: {},
+        save: async () => {},
+        fetch,
+      });
+      expect(await checker.check()).toEqual({ status: "current" });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("does not use invalid tags to construct a manifest URL", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(Response.json(release("../../evil")));
+    const checker = new DailyUpdateChecker({
+      version: "0.1.0",
+      platform: "darwin",
+      arch: "arm64",
+      state: {},
+      save: async () => {},
+      fetch,
+    });
+    await expect(checker.check()).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("treats a repository without a release as current", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("", { status: 404 }));
+    const checker = new DailyUpdateChecker({
+      version: "0.1.0",
+      platform: "darwin",
+      arch: "arm64",
+      state: {},
+      save: async () => {},
+      fetch,
+    });
+    expect(await checker.check()).toEqual({ status: "current" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    new Response("", { status: 503 }),
+    new Response("<html>proxy details</html>"),
+  ])(
+    "does not record success when the manifest cannot be read",
+    async (response) => {
+      const state = {};
+      const fetch = vi
+        .fn()
+        .mockResolvedValueOnce(Response.json(release()))
+        .mockResolvedValueOnce(response);
+      const checker = new DailyUpdateChecker({
+        version: "0.1.0",
+        platform: "darwin",
+        arch: "arm64",
+        state,
+        now: () => day,
+        save: async () => {},
+        fetch,
+      });
+      await expect(checker.check()).rejects.toThrow();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(state).toEqual({ lastAttempt: day });
+    },
+  );
 });
 
 describe("update check failures", () => {

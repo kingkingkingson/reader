@@ -47,6 +47,10 @@ func TestAssistancePauseSurvivesRestart(t *testing.T) {
 	if !p.Enabled || p.Status != "queued" {
 		t.Fatalf("wrong scope: %+v", p)
 	}
+	p.Phase = "translating"
+	if err := s.Store.saveProcessing(p); err != nil {
+		t.Fatal(err)
+	}
 	p = assistanceRequest(t, s, "pause")
 	s.StartProcessing(ctx)()
 	got, _ = s.Store.processing("doc")
@@ -60,6 +64,7 @@ func TestAssistancePauseSurvivesRestart(t *testing.T) {
 func TestAssistanceJoinsProcessingWithoutCancellingChat(t *testing.T) {
 	s, p := processingFixture(t)
 	s.Token = "test-secret"
+	p.Phase = "translating"
 	_ = s.Store.saveProcessing(p)
 	ctx, cancel := context.WithCancel(context.Background())
 	task := &documentTask{cancel: cancel, done: make(chan struct{})}
@@ -147,7 +152,7 @@ func TestImportWithAutoTranslationDisabledDoesNotStartBackgroundAI(t *testing.T)
 	}
 }
 
-func TestFullProcessingRetainsEarlierOCRWarnings(t *testing.T) {
+func TestFullProcessingIgnoresEarlierOCRWarnings(t *testing.T) {
 	s, p := processingFixture(t)
 	m, _ := s.readLayout("doc")
 	m.Pages = 10
@@ -158,8 +163,8 @@ func TestFullProcessingRetainsEarlierOCRWarnings(t *testing.T) {
 	if e := s.learnPDF(context.Background(), &p); e != nil {
 		t.Fatal(e)
 	}
-	if !p.Incomplete {
-		t.Fatal("whole-book status forgot an earlier scanned page")
+	if p.Incomplete || p.Warning != "" {
+		t.Fatalf("obsolete no-text warning retained: %+v", p)
 	}
 }
 
@@ -200,6 +205,7 @@ func TestImportAutoTranslationPreferenceOnlyAffectsNewDocuments(t *testing.T) {
 func TestPausedParallelProgressCannotReenableProcessing(t *testing.T) {
 	s, p := processingFixture(t)
 	p.Translating = &ProcessingStage{Status: "running"}
+	p.Phase = "translating"
 	p.Enabled, p.Status = false, "paused"
 	if err := s.Store.saveProcessing(p); err != nil {
 		t.Fatal(err)

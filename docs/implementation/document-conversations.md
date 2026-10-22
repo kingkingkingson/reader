@@ -42,6 +42,33 @@ Reader 保存 native pending/committed turn 进度。原生运行失败、取消
 
 Codex 按 `agentMessage.phase` 输出正式回答；commentary 不作为最终答案。没有 phase 的旧协议等消息或 turn 完成后再确认候选内容。原生 compact 继续由 Codex 决定，Reader 接收事件后允许重新附加概要和当前摘录。
 
+## 单向接续到 Codex App
+
+选择 Codex 后，右侧 Agent 顶栏提供“在 Codex 中继续”按钮。必须已有一次成功保存的 Codex 文档阅读对话；正在生成时禁用。仅使用临时图片聊天、翻译或其他提供方的文档，需要先完成一次 Codex 文档阅读对话。
+
+`POST /api/documents/{id}/codex-handoff` 在既有认证与文档生命周期内执行：
+
+1. 与聊天生成互斥，读取 Reader 的完整已保存消息、原文索引和 Codex `nativeCommittedTurn`。
+2. 在书库 `handoffs/codex/<快照摘要>/` 下复制原始 PDF/EPUB，保存带原生位置和覆盖范围的 `document.json`、完整 `conversation.json`、`metadata.json` 和 `READING_CONTEXT.md`。
+3. 使用官方 App Server `thread/fork`，以 `lastTurnId` 截止到 Reader 已提交的一轮。新的 `cwd` 指向快照目录，`baseInstructions` 明确后续使用文件快照阅读。此过程不调用 `turn/start`，不向模型请求回答。
+4. 保存新线程 ID，设置“阅读 · 文档标题”，通过 `codex://threads/<id>` 打开。桌面 IPC 只接受 UUID 线程编号；网页预览交给系统注册的 Codex 协议处理程序。
+
+Codex 原生上下文保留在 fork 中；Reader 完整可见聊天另外保存到 `conversation.json`，覆盖原生线程之外的图片对话或提供方切换记录。接续说明要求先核对这些消息，再根据当前问题读原文。索引不等于完整图片、表格或公式，历史附件描述也不等于原图，需要时核对原始文档副本。
+
+Reader 的 MCP 地址、token 环境变量和活动请求绑定不适用于 Codex App。接续不复制这些运行配置，而是使用 Codex 当前可用的文件、搜索和 PDF 工具。关闭 Reader 后快照仍可读取。fork 初始使用只读权限与按需审批；用户在 Codex 中的设置可能改变后续权限。
+
+这是独立副本：Codex 后续消息不回写 Reader，Reader 后续消息也不会自动更新该副本。已成功准备的相同快照会复用线程，打开失败时重试不会重新复制。更名失败会保留已经返回的线程 ID，重试只补更名。Reader 对话、原生绑定及原文件均不修改。导出快照由用户保留，删除 Reader 原文时不会清理它；它会额外占用原文件及文本快照的磁盘空间。
+
+已通过本机 Codex CLI `0.163.0-alpha.10.2` 的真实协议验证：临时 Codex 状态目录与 loopback 合成响应服务创建一轮测试记录，接续后关闭进程，再恢复副本，核对提交轮次、分页聊天历史、工作目录和阅读说明；接续阶段没有请求响应服务。测试不会读取用户 Codex 凭据或访问真实模型。可重复执行：
+
+```sh
+READER_CODEX_HANDOFF_LIVE=1 go -C apps/server test ./internal/reader -run '^TestCodexHandoffInstalledCLI$' -count=1 -v
+```
+
+人工验收：在 Reader 完成一次 Codex 文档问答，点击接续按钮，确认 Codex App 打开“阅读 · …”，已有回答可见；关闭 Reader 后追问原文，确认从快照读取；回到 Reader 确认原消息没有改变。没有安装 Codex App 时，应保留准备结果并允许安装后重试。深链入口已核对已安装 App 的实现，原生界面打开和续聊仍需人工验收。
+
+协议参考：[Codex App Server](https://learn.chatgpt.com/docs/app-server)。持久线程存在于 Codex 存储中不保证立即出现在 App 侧栏；该功能使用明确的线程链接，不依赖侧栏刷新，也不直接编辑 Codex 数据库。
+
 ## API
 
 API 接入保存 Chat Completions 协议消息，包括 assistant 工具请求、call ID 和所有 tool 结果。后续问题追加到同一个有效窗口。DeepSeek 等提供方要求回传的 `reasoning_content` 保留原样用于协议续接；其可见文本另存为助手消息的 `reasoning` 字段，通过独立 SSE 通道实时显示并支持历史回看。运行审计不重复保存思考内容，展示记录不拼入后续问题，避免重复上下文。

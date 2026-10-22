@@ -13,6 +13,8 @@ export { ChatStreamError, type ChatStreamEvent } from "./chat-stream";
 import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
 import type {
+  ChatRun,
+  DocumentChatSession,
   Document,
   DocumentOverview,
   OverviewJob,
@@ -321,7 +323,7 @@ export const api = {
         body: JSON.stringify({ index, target }),
       },
     ),
-  /** Queues a page range, capped by the server; nextPage is where it stopped. */
+  /** Queues the entire page range through the shared translation workers. */
   translateRange: (id: string, fromPage: number, toPage: number) =>
     request<{
       queued: number;
@@ -414,17 +416,34 @@ export const api = {
     return data;
   },
   /** Papers over 100 pages or 100 MB fail with code "large-paper" unless allowLarge. */
-  import: (file: File, library: LibraryMode = "books", allowLarge = false) => {
+  import: (
+    file: File,
+    library: LibraryMode = "books",
+    allowLarge = false,
+    folder = "",
+  ) => {
     const form = new FormData();
     form.append("library", library);
     if (allowLarge) form.append("allowLarge", "1");
+    if (folder.startsWith("smart:"))
+      form.append("smartCategory", folder.slice(6));
+    else if (folder)
+      form.append(
+        "folder",
+        folder.startsWith("folder:") ? folder.slice(7) : folder,
+      );
     form.append("file", file);
     return request<Document>("/api/documents", { method: "POST", body: form });
   },
   /** Import a paper from an arXiv ID, DOI, paper link, PDF link or title. */
   resolveDocument: (
     ref: string,
-    options?: { library: LibraryMode; allowLarge: boolean },
+    options?: {
+      library: LibraryMode;
+      allowLarge: boolean;
+      folder?: string;
+      smartCategory?: string;
+    },
   ) =>
     request<Document>("/api/documents/resolve", {
       method: "POST",
@@ -491,6 +510,11 @@ export const api = {
     request<Document>(`/api/documents/${id}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
+    }),
+  recoverAnnotations: (id: string, force = false) =>
+    request<{ checked: boolean }>(`/api/documents/${id}/annotations/recover`, {
+      method: "POST",
+      body: JSON.stringify({ force }),
     }),
   annotations: (id: string) =>
     request<Annotation[]>(`/api/documents/${id}/annotations`),
@@ -580,6 +604,57 @@ export const api = {
     ),
   messages: (id: string, signal?: AbortSignal) =>
     request<Message[]>(`/api/documents/${id}/messages`, { signal }),
+  chatSessions: (id: string, signal?: AbortSignal) =>
+    request<DocumentChatSession[]>(`/api/documents/${id}/chat-sessions`, {
+      signal,
+    }),
+  createChatSession: (id: string, provider: string) =>
+    request<DocumentChatSession>(`/api/documents/${id}/chat-sessions`, {
+      method: "POST",
+      body: JSON.stringify({ provider }),
+    }),
+  updateChatSession: (
+    id: string,
+    sessionId: string,
+    patch: { title?: string; provider?: string },
+  ) =>
+    request<DocumentChatSession>(
+      `/api/documents/${id}/chat-sessions/${sessionId}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ),
+  sessionMessages: (id: string, sessionId: string, signal?: AbortSignal) =>
+    request<Message[]>(
+      `/api/documents/${id}/chat-sessions/${sessionId}/messages`,
+      { signal },
+    ),
+  startChatRun: (
+    id: string,
+    sessionId: string,
+    input: {
+      provider: string;
+      prompt: string;
+      context: string;
+      userMessageId?: string;
+      references: SourceReference[];
+      attachments: string[];
+      readingLocation?: DocumentLocation;
+    },
+  ) =>
+    request<ChatRun>(`/api/documents/${id}/chat-sessions/${sessionId}/chat`, {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(30_000),
+    }),
+  cancelChatRun: (id: string, sessionId: string, runId: string) =>
+    request<{ ok: boolean }>(
+      `/api/documents/${id}/chat-sessions/${sessionId}/runs/${runId}/cancel`,
+      { method: "POST", signal: AbortSignal.timeout(30_000) },
+    ),
+  codexHandoff: (id: string, sessionId?: string) =>
+    request<components["schemas"]["CodexHandoff"]>(
+      `/api/documents/${encodeURIComponent(id)}/codex-handoff${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+      { method: "POST" },
+    ),
   validateEvidence: (id: string, message: string, source: string) =>
     request<{ valid: boolean }>(
       `/api/documents/${encodeURIComponent(id)}/messages/${encodeURIComponent(message)}/sources/${encodeURIComponent(source)}`,
@@ -684,4 +759,24 @@ export async function chat(
     });
     throw error;
   }
+}
+
+/** Attach/replay a run without starting another model request. */
+export async function watchChatRun(
+  id: string,
+  sessionId: string,
+  runId: string,
+  signal: AbortSignal,
+  emit: (event: ChatStreamEvent) => void,
+) {
+  const response = await diagnosticFetch(
+    `/api/documents/${id}/chat-sessions/${sessionId}/runs/${runId}/events`,
+    { headers: { Authorization: `Bearer ${sessionToken}` }, signal },
+  );
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `读取运行失败 (${response.status})`);
+  }
+  if (!response.body) throw new Error("没有收到运行事件");
+  await consumeChatStream(response.body, signal, emit);
 }

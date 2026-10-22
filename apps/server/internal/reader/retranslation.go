@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"slices"
 )
 
 // Task choices and layout progress are persisted. Connections, capabilities
@@ -84,6 +85,12 @@ func (s *Server) translationPrevious(documentID string) (map[string]bool, error)
 }
 
 func (s *Server) requestRetranslation(w http.ResponseWriter, r *http.Request) {
+	lock := s.annotationRecoveryLock(r.PathValue("id"))
+	if !lock.TryLock() {
+		fail(w, 409, "正在检查批注，请稍后重新翻译")
+		return
+	}
+	defer lock.Unlock()
 	config := s.aiConfig()
 	if !validAgent(config.Primary) || !(primaryCapable(config, taskTranslation) || capable(config, "text-api", false)) {
 		fail(w, 409, "请先配置并检测翻译模型")
@@ -150,6 +157,7 @@ func (s *Server) queueRetranslation(p Processing, m translationInput, options tr
 	if err != nil {
 		return err
 	}
+	previousItems := slices.Clone(items)
 	text := map[string]bool{}
 	for _, paragraph := range m.translationParagraphs() {
 		text[paragraph.BlockID+":"+paragraph.SourceHash] = true
@@ -175,6 +183,9 @@ func (s *Server) queueRetranslation(p Processing, m translationInput, options tr
 		return err
 	}
 	defer tx.Rollback()
+	if err = captureAnnotationAnchors(tx, p.DocumentID, previousItems); err != nil {
+		return err
+	}
 	for _, item := range items {
 		if !text[item.BlockID+":"+item.SourceHash] || item.Status != "pending" {
 			continue
@@ -203,6 +214,9 @@ ON CONFLICT(document_id,block_id,source_hash) DO UPDATE SET body=excluded.body`,
 	p.Translating = &ProcessingStage{Status: "queued", Detail: "等待重新解析版面"}
 	p.UpdatedAt = now()
 	if _, err = tx.Exec("UPDATE document_processing SET phase=?,status=?,body=? WHERE document_id=?", p.Phase, p.Status, jsonText(p), p.DocumentID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("INSERT INTO annotation_recovery(document_id,checked) VALUES(?,0) ON CONFLICT(document_id) DO UPDATE SET checked=0", p.DocumentID); err != nil {
 		return err
 	}
 	return tx.Commit()

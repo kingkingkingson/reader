@@ -3787,6 +3787,39 @@ textarea.paper-note-input {
   opacity: 0.4;
 }
 
+.paper-drag-preview {
+  position: fixed;
+  inset: 0 auto auto 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(280px, 80vw);
+  min-height: 40px;
+  padding: 10px 12px;
+  overflow: hidden;
+  contain: layout paint;
+  pointer-events: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 12px;
+  line-height: 18px;
+  box-shadow: 0 3px 12px #0002;
+}
+.paper-drag-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.paper-drag-count {
+  flex: none;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Temporary paper tags share the current category and text search. */
 .paper-tag-filter {
   display: flex;

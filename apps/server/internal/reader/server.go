@@ -29,6 +29,9 @@ import (
 )
 
 type Server struct {
+	chatReservations       map[string]bool
+	chatMu                 sync.Mutex
+	chatRuns               map[string]*chatRun
 	Diagnostics            *diagnostics.Store
 	connectorMu            sync.Mutex
 	connectorAvailable     bool
@@ -37,6 +40,7 @@ type Server struct {
 	zoteroMu               sync.Mutex
 	zoteroScans            map[string]*zoteroScan
 	endnoteScans           map[string]*endnoteScan
+	annotationCheckLocks   sync.Map
 	annotationMu           sync.Mutex
 	annotationHistory      []annotationChange
 	codexChat              codexChatCache
@@ -162,6 +166,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/documents/{id}/classification", s.retryClassification)
 	mux.HandleFunc("POST /api/documents/{id}/annotations/undo", s.undoAnnotation)
 	mux.HandleFunc("GET /api/documents/{id}/annotations", s.annotations)
+	mux.HandleFunc("POST /api/documents/{id}/annotations/recover", s.recoverAnnotations)
 	mux.HandleFunc("POST /api/documents/{id}/annotations", s.recordAnnotation(s.saveAnnotation))
 	mux.HandleFunc("PATCH /api/documents/{id}/annotations/{annotation}", s.recordAnnotation(s.updateAnnotationNote))
 	mux.HandleFunc("DELETE /api/documents/{id}/annotations/{annotation}", s.recordAnnotation(func(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +183,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/documents/{id}/messages", s.messages)
 	mux.HandleFunc("GET /api/documents/{id}/messages/{message}/sources/{source}", s.validateChatEvidence)
 	mux.HandleFunc("POST /api/documents/{id}/chat", s.chat)
+	mux.HandleFunc("GET /api/documents/{id}/chat-sessions", s.listChatSessions)
+	mux.HandleFunc("POST /api/documents/{id}/chat-sessions", s.createChatSession)
+	mux.HandleFunc("PATCH /api/documents/{id}/chat-sessions/{session}", s.updateChatSession)
+	mux.HandleFunc("GET /api/documents/{id}/chat-sessions/{session}/messages", s.sessionMessages)
+	mux.HandleFunc("POST /api/documents/{id}/chat-sessions/{session}/chat", s.chat)
+	mux.HandleFunc("GET /api/documents/{id}/chat-sessions/{session}/runs/{run}/events", s.sessionRunEvents)
+	mux.HandleFunc("POST /api/documents/{id}/chat-sessions/{session}/runs/{run}/cancel", s.cancelSessionRun)
+	mux.HandleFunc("POST /api/documents/{id}/codex-handoff", s.handoffCodex)
 	mux.HandleFunc("GET /api/providers", s.providers)
 	mux.HandleFunc("GET /api/documents/{id}/processing-usage", s.processingUsage)
 	mux.HandleFunc("GET /api/documents/{id}/chat-usage", s.chatUsage)
@@ -340,7 +353,7 @@ func (s *Server) importDocument(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "保存失败")
 		return
 	}
-	d, status, err := s.importFile(r.Context(), temp.Name(), header.Filename, library, r.FormValue("allowLarge") == "1")
+	d, status, err := s.importFileToCategory(r.Context(), temp.Name(), header.Filename, library, r.FormValue("allowLarge") == "1", r.FormValue("folder"), r.FormValue("smartCategory"))
 	var large importError
 	if errors.As(err, &large) && large.code != "" {
 		respond(w, status, map[string]any{"error": large.message, "code": large.code, "pages": large.pages})
@@ -372,11 +385,19 @@ func (e importError) Error() string { return e.message }
 // file returns the existing document, whichever library holds it.
 // A long paper is imported only after the reader confirms (allowLarge).
 func (s *Server) importFile(ctx context.Context, temp, filename, library string, allowLarge bool) (Document, int, error) {
+	return s.importFileToCategory(ctx, temp, filename, library, allowLarge, "", "")
+}
+
+func (s *Server) importFileToCategory(ctx context.Context, temp, filename, library string, allowLarge bool, folder, smartCategory string) (Document, int, error) {
 	s.importMu.Lock()
 	defer s.importMu.Unlock()
 	kind := strings.TrimPrefix(strings.ToLower(filepath.Ext(filename)), ".")
 	failure := func(status int, message string) (Document, int, error) {
 		return Document{}, status, importError{status: status, message: message}
+	}
+	tags, categoryErr := s.importCategoryTags(library, folder, smartCategory)
+	if categoryErr != nil {
+		return failure(400, categoryErr.Error())
 	}
 	f, err := os.Open(temp)
 	if err != nil {
@@ -430,7 +451,7 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 		}
 	}
 	d := Document{ID: docID, Type: kind, Title: strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename)), Size: size, CreatedAt: now(), LastOpenedAt: "", Library: library}
-	d.Category, d.CategorySource, d.ClassificationStatus, d.Tags, d.Folders = "article", "default", "pending", []string{}, []string{}
+	d.Category, d.CategorySource, d.ClassificationStatus, d.Tags, d.Folders = "article", "default", "pending", tags, []string{}
 	if kind == "pdf" && library == "books" {
 		// Classification reads parsed text, which books gain chapter by chapter.
 		d.ClassificationStatus = "idle"
@@ -441,6 +462,9 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 	if library == "papers" {
 		// The library choice is the user's classification; no AI guess is needed.
 		d.Category, d.CategorySource, d.ClassificationStatus = "paper", "manual", "done"
+		if folder != "" {
+			d.Folders = []string{folder}
+		}
 	}
 	var texts map[string]string
 	cache := filepath.Join(s.Store.Root, "cache", docID)
@@ -488,7 +512,9 @@ func (s *Server) importFile(ctx context.Context, temp, filename, library string,
 		// Papers imported from files look up their metadata once parsed.
 		metadata = `{"lookup":"pending"}`
 	}
-	_, err = tx.Exec("INSERT INTO documents(id,type,title,author,size,created_at,last_opened_at,category,category_source,classification_status,library,metadata) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", d.ID, d.Type, d.Title, d.Author, d.Size, d.CreatedAt, d.LastOpenedAt, d.Category, d.CategorySource, d.ClassificationStatus, d.Library, metadata)
+	folders, _ := json.Marshal(d.Folders)
+	tagJSON, _ := json.Marshal(d.Tags)
+	_, err = tx.Exec("INSERT INTO documents(id,type,title,author,size,created_at,last_opened_at,category,category_source,classification_status,library,metadata,folders,tags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", d.ID, d.Type, d.Title, d.Author, d.Size, d.CreatedAt, d.LastOpenedAt, d.Category, d.CategorySource, d.ClassificationStatus, d.Library, metadata, string(folders), string(tagJSON))
 	if err == nil {
 		for href, text := range texts {
 			_, err = tx.Exec("INSERT INTO search_index(document_id,href,content) VALUES(?,?,?)", d.ID, href, text)
@@ -728,6 +754,11 @@ func (s *Server) saveAnnotation(w http.ResponseWriter, r *http.Request) {
 	a.DocumentID = d.ID
 	a.CreatedAt = now()
 	a.AnswerID, a.Resolved = "", false
+	if m, e := s.readTranslationSource(d.ID); e == nil {
+		if translations, e := s.visibleTranslations(d.ID, m); e == nil {
+			a = enrichTranslationAnnotation(a, translations)
+		}
+	}
 	result, err := s.Store.saveAnnotation(a)
 	if err != nil {
 		fail(w, 500, "批注保存失败")
@@ -869,6 +900,12 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, out)
 }
 func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
+	var defaultID string
+	if s.Store.DB.QueryRow("SELECT id FROM chat_sessions WHERE document_id=? ORDER BY rowid LIMIT 1", r.PathValue("id")).Scan(&defaultID) == nil {
+		r.SetPathValue("session", defaultID)
+		s.sessionMessages(w, r)
+		return
+	}
 	rows, err := s.Store.DB.Query("SELECT body FROM messages WHERE document_id=? ORDER BY created_at", r.PathValue("id"))
 	if err != nil {
 		fail(w, 500, "读取对话失败")

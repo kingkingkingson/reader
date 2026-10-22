@@ -151,6 +151,7 @@ it("groups proxy settings and log export under diagnostics without a network tab
     exportDiagnostics: exportLogs,
     checkForUpdates: vi.fn(),
     writeClipboardText: vi.fn(),
+    writeClipboardImage: vi.fn(),
     setAppearance: vi.fn(),
     importFiles: vi.fn(),
     importLargePapers: vi.fn(),

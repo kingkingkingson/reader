@@ -14,7 +14,7 @@ func (s *Server) saveDocumentAgentAnswer(ctx context.Context, a *documentAgent, 
 	if e != nil {
 		return e
 	}
-	message := Message{ID: id(), DocumentID: a.corpus.DocumentID, Role: "assistant", Content: text, References: refs, CreatedAt: now()}
+	message := Message{SessionID: a.sessionID, ID: id(), DocumentID: a.corpus.DocumentID, Role: "assistant", Content: text, References: refs, CreatedAt: now()}
 	if len(reasoning) > 0 {
 		message.Reasoning = reasoning[0]
 	}

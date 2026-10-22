@@ -127,5 +127,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	}
 	defer finish()
 	r = r.WithContext(ctx)
+	if r.PathValue("session") == "" {
+		var defaultID string
+		if s.Store.DB.QueryRow("SELECT id FROM chat_sessions WHERE document_id=? ORDER BY rowid LIMIT 1", d.ID).Scan(&defaultID) == nil {
+			r.SetPathValue("session", defaultID)
+			r.SetPathValue("legacy", "true")
+		}
+	}
 	s.chatDocument(w, r, d, req.Provider, req.Prompt, *req.Context, req.References, req.Attachments, req.ReadingLocation, req.UserMessageID)
 }

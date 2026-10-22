@@ -155,6 +155,38 @@ export function useSentenceMarks(
       registry.delete(searchName);
       names = [];
       marks = translatedAnnotationRanges(host, annotations, translations);
+      for (const annotation of annotations) {
+        if (
+          annotation.location.type !== "pdf" ||
+          annotation.location.translation ||
+          annotation.kind === "bookmark"
+        )
+          continue;
+        const passages = annotation.location.sourceAnchors?.flatMap(
+          (anchor) => {
+            const normalize = (text: string) =>
+              text.replace(/\s/g, "").toLowerCase();
+            const candidates = blocks.filter(
+              (block) =>
+                block.page === anchor.page &&
+                normalize(block.text).includes(normalize(anchor.source)),
+            );
+            const block =
+              candidates.find((block) => block.id === anchor.blockId) ??
+              (candidates.length === 1 ? candidates[0] : undefined);
+            return block
+              ? [{ blockId: block.id, sources: [anchor.source] }]
+              : [];
+          },
+        );
+        if (passages?.length)
+          marks.push(
+            ...(engine.sentenceRanges?.(passages) ?? []).map((range) => ({
+              annotation,
+              range,
+            })),
+          );
+      }
       const groups = new Map<string, Range[]>();
       const rules: string[] = [];
       for (const mark of marks) {

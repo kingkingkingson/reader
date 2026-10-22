@@ -4,6 +4,42 @@ import {
   type TranslationEvent,
 } from "./translation-stream";
 
+it("accepts unrequested book paragraphs alongside completed translations", async () => {
+  const idle = {
+    blockId: "p2-b1",
+    sourceHash: "hash",
+    status: "idle",
+    sentences: [],
+  };
+  const complete = {
+    ...idle,
+    blockId: "p1-b1",
+    status: "complete",
+    sentences: [{ source: "Source.", target: "译文。" }],
+  };
+  const abort = new AbortController();
+  const events: TranslationEvent[] = [];
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(
+        new TextEncoder().encode(
+          `event: snapshot\ndata: ${JSON.stringify([complete, idle])}\n\nevent: translation\ndata: ${JSON.stringify(idle)}\n\n`,
+        ),
+      );
+    },
+  });
+  await expect(
+    consumeTranslationStream(body, abort.signal, (event) => {
+      events.push(event);
+      if (events.length === 2) abort.abort();
+    }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(events).toEqual([
+    { event: "snapshot", data: [complete, idle] },
+    { event: "translation", data: idle },
+  ]);
+});
+
 it("delivers completed paragraphs before EOF across fragmented UTF-8 and multiple frames", async () => {
   let source!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({

@@ -251,27 +251,6 @@ func (s *Server) getAIConfig(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, publicConfig(s.aiConfig()))
 }
 
-// Runtime failures invalidate only the request's configuration and capability
-// revision. A late failure must not overwrite a new model or a newer manual test.
-func (s *Server) recordCapabilityFailure(snapshot AIConfig, provider string, vision bool, failure error) error {
-	s.configMu.Lock()
-	defer s.configMu.Unlock()
-	latest := s.readAIConfig()
-	cap := latest.Capabilities[provider]
-	if configPrint(latest, provider) != configPrint(snapshot, provider) || cap.CheckedAt != snapshot.Capabilities[provider].CheckedAt {
-		return nil
-	}
-	cap.Vision = false
-	cap.PendingVision = false
-	if !vision {
-		cap.Text = false
-	}
-	cap.Error = failure.Error()
-	cap.CheckedAt = now()
-	cap.Fingerprint = configPrint(latest, provider)
-	latest.Capabilities[provider] = cap
-	return s.writeAIConfig(latest)
-}
 func (s *Server) putAIConfig(w http.ResponseWriter, r *http.Request) {
 	var c AIConfig
 	if !decode(w, r, &c) {

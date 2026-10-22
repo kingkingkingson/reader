@@ -18,6 +18,13 @@ export type SentenceLink = {
   }[];
 };
 export type PDFLocation = {
+  /** Independent source marks split from legacy translation-origin records. */
+  sourceAnchors?: {
+    blockId: string;
+    source: string;
+    page: number;
+    bounds: { x: number; y: number; width: number; height: number };
+  }[];
   type: "pdf";
   page: number;
   x?: number;
@@ -29,13 +36,22 @@ export type PDFLocation = {
   translation?: TranslationLocation;
   rects?: { x: number; y: number; width: number; height: number }[];
 };
-export type TranslationLocation = {
+export type TranslationRecoveryAnchor = {
+  /** Source sentence text survives changes to translation sentence boundaries. */
+  sourceText?: string;
+  /** Entire paragraph target; detects offsets shifted by preceding sentences. */
+  targetText?: string;
+  recovered?: boolean;
+  wholeSentence?: boolean;
+  matchedQuote?: string;
+};
+export type TranslationLocation = TranslationRecoveryAnchor & {
   blockId: string;
   sourceHash: string;
   sentenceIndexes: number[];
   start: number;
   end: number;
-  ranges?: {
+  ranges?: (TranslationRecoveryAnchor & {
     blockId: string;
     sourceHash: string;
     sentenceIndexes: number[];
@@ -43,7 +59,7 @@ export type TranslationLocation = {
     end: number;
     quote: string;
     location?: EPUBLocation;
-  }[];
+  })[];
 };
 export type EPUBLocation = {
   blockId?: string;
@@ -123,7 +139,7 @@ export type PaperSort =
   | "venue"
   | "status"
   | "notes";
-/** Optional columns of the paper table; the title is always shown. */
+/** Metadata columns of the paper table. */
 export type PaperColumn =
   | "authors"
   | "year"
@@ -180,10 +196,12 @@ export interface PaperLibraryPreferences {
   layout?: "list" | "table";
   /** Visible table columns in order. */
   columns?: PaperColumn[];
-  /** Order of all table columns, including hidden ones; the title remains visible. */
+  /** Whether the title column is shown (default on). */
+  showTitle?: boolean;
+  /** Order of all table columns, including hidden ones. */
   columnOrder?: ("title" | PaperColumn)[];
-  /** Widths of resized table columns in CSS pixels; the title fills the rest. */
-  columnWidths?: Partial<Record<PaperColumn, number>>;
+  /** Widths of resized table columns in CSS pixels. */
+  columnWidths?: Partial<Record<"title" | PaperColumn, number>>;
   /** Width of the paper detail panel in CSS pixels. */
   detailWidth?: number;
   /** Look up metadata from the DOI or arXiv ID printed in imported PDFs. */
@@ -509,6 +527,7 @@ export interface ImageAttachment {
   caption?: string;
 }
 export interface Message {
+  sessionId?: string;
   /** Provider-returned thinking, displayed separately and never added to answer context. */
   reasoning?: string;
   /** Navigation snapshot at send time; not an original-text citation. */
@@ -778,3 +797,24 @@ export type {
 } from "./proxy-settings";
 export type { UpdateProgress } from "./update-progress";
 export type { CommandLineStatus } from "./command-line";
+
+export interface ChatRun {
+  id: string;
+  sessionId: string;
+  documentId: string;
+  userMessageId: string;
+  provider: string;
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+export interface DocumentChatSession {
+  id: string;
+  documentId: string;
+  title: string;
+  provider: string;
+  createdAt: string;
+  updatedAt: string;
+  latestRun?: ChatRun;
+}

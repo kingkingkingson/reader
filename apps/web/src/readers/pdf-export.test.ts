@@ -317,3 +317,44 @@ describe("export helpers", () => {
     expect(hexColor("red")).toEqual([250, 204, 21]);
   });
 });
+
+it("exports independently split source sentences across pages, but never the translated record", async () => {
+  const source = mark({
+    location: {
+      type: "pdf",
+      page: 1,
+      sourceAnchors: [
+        {
+          blockId: "p1-b8",
+          source: "A claim is not the same as evidence.",
+          page: 1,
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+        },
+        {
+          blockId: "p2-b3",
+          source: "Separate quotations, interpretations, and open questions.",
+          page: 2,
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+        },
+      ],
+    },
+  });
+  const translated = mark({
+    id: "translated",
+    location: {
+      type: "pdf",
+      page: 1,
+      translation: {
+        blockId: "p1-b8",
+        sourceHash: "h",
+        sentenceIndexes: [0],
+        start: 0,
+        end: 1,
+      },
+    },
+  });
+  const { result, pages } = await exportAndReopen([source, translated]);
+  expect(result).toMatchObject({ exported: 1, skipped: 1 });
+  expect(pages[0].some((a) => a.subtype === "Highlight")).toBe(true);
+  expect(pages[1].some((a) => a.subtype === "Highlight")).toBe(true);
+});

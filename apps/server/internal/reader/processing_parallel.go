@@ -41,6 +41,7 @@ func mergeProcessing(current, update Processing) Processing {
 	return current
 }
 func aggregateProcessing(p *Processing) {
+	normalizeNoTextProcessing(p)
 	if !p.Enabled {
 		p.Status, p.Detail = "paused", "翻译已暂停"
 		return
@@ -53,9 +54,6 @@ func aggregateProcessing(p *Processing) {
 	p.Phase, p.Status, p.Detail = "ready", "complete", "正文翻译已就绪"
 	if p.CompletedAt == "" {
 		p.CompletedAt = now()
-	}
-	if p.Incomplete {
-		p.Detail = "部分就绪：有页面缺少可提取文字，尚未接入 OCR"
 	}
 }
 

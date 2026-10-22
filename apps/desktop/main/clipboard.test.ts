@@ -1,7 +1,22 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { clipboard, type IpcMainInvokeEvent, type WebContents } from "electron";
-import { writeClipboardText } from "./clipboard";
-vi.mock("electron", () => ({ clipboard: { writeText: vi.fn() } }));
+import {
+  clipboard,
+  nativeImage,
+  type IpcMainInvokeEvent,
+  type WebContents,
+} from "electron";
+import { writeClipboardImage, writeClipboardText } from "./clipboard";
+vi.mock("electron", () => ({
+  clipboard: { writeText: vi.fn(), write: vi.fn() },
+  ClipboardItem: class {
+    constructor(readonly items: Record<string, unknown>) {}
+  },
+  nativeImage: {
+    createFromBuffer: vi.fn((data: Buffer) => ({
+      isEmpty: () => data.length === 0,
+    })),
+  },
+}));
 afterEach(() => vi.clearAllMocks());
 function sender(url = "http://127.0.0.1:1234/") {
   const frame = { url };
@@ -48,4 +63,33 @@ it.each([
     ),
   ).toThrow();
   expect(clipboard.writeText).not.toHaveBeenCalled();
+});
+it("writes a figure image with its caption from the app main frame", () => {
+  const { contents, event } = sender();
+  writeClipboardImage(
+    event,
+    new Uint8Array([137, 80, 78, 71]),
+    "图 1",
+    contents,
+    "http://127.0.0.1:1234",
+  );
+  expect(nativeImage.createFromBuffer).toHaveBeenCalledWith(
+    Buffer.from([137, 80, 78, 71]),
+  );
+  const [[item]] = vi.mocked(clipboard.write).mock.calls[0];
+  expect(item).toMatchObject({
+    items: { "image/png": expect.any(Blob), "text/plain": "图 1" },
+  });
+});
+it.each([
+  ["external origin", "https://example.com", new Uint8Array([1]), ""],
+  ["non-binary data", undefined, "png", ""],
+  ["undecodable data", undefined, new Uint8Array(), ""],
+  ["non-text caption", undefined, new Uint8Array([1]), {}],
+])("rejects image requests with %s", (_, url, data, text) => {
+  const { contents, event } = sender(url);
+  expect(() =>
+    writeClipboardImage(event, data, text, contents, "http://127.0.0.1:1234"),
+  ).toThrow();
+  expect(clipboard.write).not.toHaveBeenCalled();
 });

@@ -11,6 +11,9 @@ execFileSync(
     stdio: "inherit",
   },
 );
+execFileSync(process.execPath, [pnpm, "--filter", "@reader/agent", "build"], {
+  stdio: "inherit",
+});
 const token = randomBytes(32).toString("hex");
 execFileSync(
   process.execPath,
@@ -34,6 +37,9 @@ const server = spawn(
       ...process.env,
       READER_TOKEN: token,
       READER_NODE: process.execPath,
+      READER_AGENT: fileURLToPath(
+        new URL("../apps/agent/dist/main.mjs", import.meta.url),
+      ),
       READER_PROCESSOR: fileURLToPath(
         new URL("../apps/processor/dist/main.mjs", import.meta.url),
       ),

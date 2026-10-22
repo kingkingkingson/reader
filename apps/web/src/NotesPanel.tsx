@@ -358,6 +358,7 @@ export function NotesPanel({
   onResolve,
   onShowAnswer,
   onExport,
+  onRecover,
 }: {
   document: Document;
   annotations: Annotation[];
@@ -374,7 +375,9 @@ export function NotesPanel({
   onResolve: (annotation: Annotation, resolved: boolean) => void;
   onShowAnswer: (id: string) => void;
   onExport: () => void;
+  onRecover?: () => Promise<void>;
 }) {
+  const [recovering, setRecovering] = useState(false);
   const [filter, setFilter] = useState<NotesFilter>("all");
   const [openOnly, setOpenOnly] = useState(false);
   const [color, setColor] = useState("");
@@ -513,6 +516,19 @@ export function NotesPanel({
       </ScrollArea>
       <div className="notes-footer">
         <span>{annotations.length} 条记录</span>
+        {onRecover && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={recovering}
+            onClick={() => {
+              setRecovering(true);
+              void onRecover().finally(() => setRecovering(false));
+            }}
+          >
+            {recovering ? "检查中…" : "重新定位"}
+          </Button>
+        )}
         <Button size="sm" variant="ghost" onClick={onExport}>
           <Download />
           导出

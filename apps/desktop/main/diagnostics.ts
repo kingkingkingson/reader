@@ -134,7 +134,7 @@ export class DiagnosticLogs {
   /** Does not call the sidecar, read its DB, or trust renderer-supplied paths. */
   async export(
     path: string,
-    library: string,
+    library: string | undefined,
     environment: unknown,
     settings: unknown,
   ) {
@@ -241,26 +241,29 @@ export class DiagnosticLogs {
       }
     };
     addDirectory(this.directory, "logs/");
-    const cache = join(library, "cache");
-    try {
-      if (lstatSync(library).isDirectory() && lstatSync(cache).isDirectory())
-        for (const id of readdirSync(cache).sort()) {
-          if (/^[0-9a-f]{32}$/.test(id))
-            if (!lstatSync(join(cache, id)).isDirectory())
-              missing.push(
-                `legacy/translation-failures/${id}/: unsafe directory`,
-              );
-            else
-              addDirectory(
-                join(cache, id, "translation-failures"),
-                `legacy/translation-failures/${id}/`,
-                true,
-              );
-        }
-      else missing.push("legacy/translation-failures/: unsafe cache directory");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
-        missing.push("legacy/translation-failures/: unreadable");
+    if (library) {
+      const cache = join(library, "cache");
+      try {
+        if (lstatSync(library).isDirectory() && lstatSync(cache).isDirectory())
+          for (const id of readdirSync(cache).sort()) {
+            if (/^[0-9a-f]{32}$/.test(id))
+              if (!lstatSync(join(cache, id)).isDirectory())
+                missing.push(
+                  `legacy/translation-failures/${id}/: unsafe directory`,
+                );
+              else
+                addDirectory(
+                  join(cache, id, "translation-failures"),
+                  `legacy/translation-failures/${id}/`,
+                  true,
+                );
+          }
+        else
+          missing.push("legacy/translation-failures/: unsafe cache directory");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+          missing.push("legacy/translation-failures/: unreadable");
+      }
     }
     if (this.fallback.length) {
       files.push({

@@ -1,3 +1,4 @@
+import { sentenceTextRanges } from "./pdf-sentence-matching";
 import type { Annotation, PDFLocation } from "@reader/core";
 import type {
   DocumentInitParameters,
@@ -161,6 +162,72 @@ function editorValue(
   };
 }
 
+async function sentenceQuads(
+  page: PDFPageProxy,
+  block: Rect,
+  sources: string[],
+): Promise<Quad[]> {
+  const viewport = page.getViewport({ scale: 1 });
+  const content = await page.getTextContent();
+  type Glyphs = {
+    start: number;
+    text: string;
+    transform: number[];
+    width: number;
+    height: number;
+  };
+  const items: Glyphs[] = [];
+  let text = "";
+  for (const item of content.items) {
+    if (!("str" in item) || !item.str.trim()) continue;
+    const [a, b, , , e, f] = item.transform;
+    // Only horizontal text is placed; rotated runs keep their block untouched.
+    if (Math.abs(b) > 1e-3 || a <= 0) continue;
+    const [cx, cy] = viewport.convertToViewportPoint(
+      e + item.width / 2,
+      f + item.height / 2,
+    );
+    const x = cx / viewport.width,
+      y = cy / viewport.height;
+    if (
+      x < block.x ||
+      x > block.x + block.width ||
+      y < block.y ||
+      y > block.y + block.height
+    )
+      continue;
+    const value = compact(item.str);
+    items.push({
+      start: text.length,
+      text: value,
+      transform: item.transform,
+      width: item.width,
+      height: item.height,
+    });
+    text += value;
+  }
+  const needles = sources.map(compact).filter(Boolean);
+  const ranges = sentenceTextRanges(text, text, needles);
+  if (!needles.length || ranges.length < needles.length) return [];
+  const quads: Quad[] = [];
+  for (const range of ranges)
+    for (const item of items) {
+      const from = Math.max(range.start, item.start) - item.start;
+      const to =
+        Math.min(range.end, item.start + item.text.length) - item.start;
+      if (to <= from) continue;
+      const [, , , d, e, f] = item.transform;
+      const per = item.width / item.text.length;
+      const left = e + from * per,
+        right = e + to * per;
+      const height = item.height || Math.abs(d);
+      const bottom = f - height * 0.2,
+        top = f + height * 0.85;
+      quads.push([left, top, right, top, left, bottom, right, bottom]);
+    }
+  return quads;
+}
+
 export interface ExportContext {
   /** Chat message text by ID, for answered questions. */
   answers?: Record<string, string>;
@@ -190,7 +257,23 @@ export async function annotatedPDF(
         skipped++;
         continue;
       }
-      if (inRange(location.page) && location.rects?.length) {
+      if (location.sourceAnchors?.length) {
+        for (const anchor of location.sourceAnchors) {
+          if (!inRange(anchor.page)) {
+            pages.clear();
+            break;
+          }
+          const page = await pdf.getPage(anchor.page);
+          const quads = await sentenceQuads(page, anchor.bounds, [
+            anchor.source,
+          ]);
+          if (!quads.length) {
+            pages.clear();
+            break;
+          }
+          pages.set(anchor.page, [...(pages.get(anchor.page) ?? []), ...quads]);
+        }
+      } else if (inRange(location.page) && location.rects?.length) {
         const page = await pdf.getPage(location.page);
         pages.set(location.page, displayQuads(page, location.rects));
       }

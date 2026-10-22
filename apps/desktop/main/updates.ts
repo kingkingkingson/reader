@@ -1,5 +1,4 @@
-export const releaseAPI =
-  "https://api.github.com/repos/cynicalight/reader/releases/latest";
+const releaseURL = "https://github.com/cynicalight/reader/releases";
 export const day = 24 * 60 * 60 * 1000;
 export const retryDelay = 60 * 60 * 1000;
 
@@ -60,9 +59,10 @@ export function selectRelease(
   installed: string,
   platform: string,
   arch: string,
+  checksums = "",
 ): UpdateResult {
   const release = record(value);
-  if (release.draft !== false || release.prerelease !== false)
+  if (release.draft === true || release.prerelease === true)
     throw new Error("更新信息不是正式发布版本");
   if (typeof release.tag_name !== "string") throw new Error("缺少发布版本号");
   const tag = release.tag_name;
@@ -73,22 +73,19 @@ export function selectRelease(
   if (!target) throw new Error("当前平台没有官方更新安装包");
   const version = tag.slice(1);
   const installer = `Reader-${version}-${target}`;
-  if (!Array.isArray(release.assets)) throw new Error("缺少发布文件列表");
-  const assets = release.assets.map(record);
-  const assetURL = (name: string) => {
-    const asset = assets.find(
-      (item) => item.name === name && item.state === "uploaded",
-    );
-    if (!asset) return undefined;
-    const expected = `https://github.com/cynicalight/reader/releases/download/${tag}/${name}`;
-    if (asset.browser_download_url !== expected)
-      throw new Error("更新文件地址与官方仓库不符");
-    return expected;
-  };
+  if (checksums.length > 64 * 1024) throw new Error("更新校验清单超过大小限制");
+  const files = new Set<string>();
+  for (const line of checksums.split(/\r?\n/).filter(Boolean)) {
+    const match = /^([a-fA-F0-9]{64}) {2}(.+)$/.exec(line);
+    if (!match || files.has(match[2]))
+      throw new Error("更新校验清单无效或重复");
+    files.add(match[2]);
+  }
+  const assetURL = (name: string) => `${releaseURL}/download/${tag}/${name}`;
+  // CI uploads the manifest last. A missing platform is not a completed check.
+  if (!files.has(installer)) return { status: "pending" };
   const downloadURL = assetURL(installer);
   const checksumURL = assetURL("SHA256SUMS.txt");
-  // Release is published before CI attaches the installers. Retry later.
-  if (!downloadURL || !checksumURL) return { status: "pending" };
   const update: ReleaseUpdate = {
     version,
     installer,
@@ -97,9 +94,8 @@ export function selectRelease(
   };
   if (platform === "darwin") {
     const archive = `Reader-${version}-${target.replace(/\.dmg$/, ".zip")}`;
-    const archiveURL = assetURL(archive);
-    if (archiveURL)
-      update.archive = { installer: archive, downloadURL: archiveURL };
+    if (files.has(archive))
+      update.archive = { installer: archive, downloadURL: assetURL(archive) };
   }
   return { status: "available", update };
 }
@@ -188,13 +184,12 @@ export class DailyUpdateChecker {
     const now = this.options.now?.() ?? Date.now();
     state.lastAttempt = now;
     await save({ ...state });
-    const response = await request(releaseAPI, {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
+    // Like electron-updater's public GitHub provider, use the website's JSON
+    // response to avoid the anonymous REST API quota shared by an entire IP.
+    const response = await request(`${releaseURL}/latest`, {
+      headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(20_000),
-      redirect: "error",
+      redirect: "follow",
       credentials: "omit",
     });
     let result: UpdateResult;
@@ -205,12 +200,38 @@ export class DailyUpdateChecker {
           response,
           this.options.now?.() ?? Date.now(),
         );
+      const release = record(await response.json());
       result = selectRelease(
-        await response.json(),
+        release,
         this.options.version,
         this.options.platform,
         this.options.arch,
       );
+      if (result.status === "pending") {
+        // selectRelease has validated the stable tag before it enters this URL.
+        const manifest = await request(
+          `${releaseURL}/download/${release.tag_name}/SHA256SUMS.txt`,
+          {
+            signal: AbortSignal.timeout(20_000),
+            redirect: "follow", // Release assets redirect to GitHub's CDN.
+            credentials: "omit",
+          },
+        );
+        if (manifest.status !== 404) {
+          if (!manifest.ok)
+            throw await updateCheckError(
+              manifest,
+              this.options.now?.() ?? Date.now(),
+            );
+          result = selectRelease(
+            release,
+            this.options.version,
+            this.options.platform,
+            this.options.arch,
+            await manifest.text(),
+          );
+        }
+      }
     }
     if (result.status !== "pending") {
       state.lastChecked = now;

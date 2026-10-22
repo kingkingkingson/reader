@@ -44,12 +44,12 @@ func TestTranslationExportUsesSavedResultsAndMarksGaps(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	text := w.Body.String()
-	for _, want := range []string{"**第一句**包含 $x^2$。", "| 甲 | 1 |", "已完成 1 / 2", "此段尚未翻译", "此页解析不完整", "## 第 2 页\n\n> 此页尚未解析"} {
+	for _, want := range []string{"**第一句**包含 $x^2$。", "| 甲 | 1 |", "已完成 1 / 2", "此段尚未翻译", "## 第 2 页\n\n> 此页尚未解析"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in %s", want, text)
 		}
 	}
-	for _, unwanted := range []string{"未完成的临时输出", "不要导出页眉", "test-secret", "First sentence"} {
+	for _, unwanted := range []string{"未完成的临时输出", "不要导出页眉", "test-secret", "First sentence", "此页解析不完整"} {
 		if strings.Contains(text, unwanted) {
 			t.Fatalf("leaked %q", unwanted)
 		}

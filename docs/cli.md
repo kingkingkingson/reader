@@ -40,7 +40,7 @@ reader import a.pdf b.pdf --library papers     # 导入；--allow-large 允许�
 
 ## 连接方式与安全
 
-Reader 启动本地服务后，在书库目录写入 `server.json`（服务地址、本次启动的访问令牌、进程号、版本），权限仅限当前用户，正常退出时删除。`reader` 默认读取 `<应用数据目录>/Reader/library/server.json`（macOS 为 `~/Library/Application Support/Reader/library`，Windows 为 `%APPDATA%\Reader\library`），可用 `--data` 或 `READER_DATA` 改为其他书库目录。
+Reader 启动本地服务后，在书库目录写入 `server.json`（服务地址、本次启动的访问令牌、进程号、版本），权限仅限当前用户，正常退出时删除。`reader` 默认读取 `<应用数据目录>/Reader/library/server.json`（macOS 为 `~/Library/Application Support/Reader/library`，Windows 为 `%APPDATA%\Reader\library`），在桌面版设置中迁移书库后，命令行会读取 `<应用数据目录>/Reader/library-location.json`，自动跟随新位置；`--data` 或 `READER_DATA` 可显式指定其他书库目录，并优先于桌面版配置。
 
 命令行只连接 `server.json` 中的本机回环地址，其他地址一律拒绝，令牌不会离开本机。同一用户的其他程序本来就能读取书库数据库，令牌文件没有扩大这一范围。崩溃留下的旧文件指向已关闭的端口，命令行报告 Reader 未运行。通过命令行导入的文档会让已打开的窗口在几秒内刷新书库。
 

@@ -101,6 +101,11 @@ func (s *Server) chatDocument(w http.ResponseWriter, r *http.Request, document D
 		fail(w, 400, err.Error())
 		return
 	}
+	if r.PathValue("session") != "" {
+		user := Message{ID: userMessageID, DocumentID: documentID, Role: "user", Content: question, Context: textContext, References: references, Attachments: attachments, ReadingLocation: readingLocation}
+		s.startSessionChat(w, r, document, config, user, images, textContext+descriptions.String())
+		return
+	}
 	if !s.aiMu.TryLock() {
 		fail(w, 409, "已有 AI 请求正在运行，请稍后再试")
 		return
@@ -161,7 +166,7 @@ func (s *Store) prepareChatQuestion(messages []Message, user Message) ([]Message
 }
 
 func sameChatQuestion(a, b Message) bool {
-	if a.Content != b.Content || a.Context != b.Context || !sameChatJSON(a.References, b.References) || !sameChatJSON(a.ReadingLocation, b.ReadingLocation) || len(a.Attachments) != len(b.Attachments) {
+	if a.SessionID != b.SessionID || a.Content != b.Content || a.Context != b.Context || !sameChatJSON(a.References, b.References) || !sameChatJSON(a.ReadingLocation, b.ReadingLocation) || len(a.Attachments) != len(b.Attachments) {
 		return false
 	}
 	for i := range a.Attachments {

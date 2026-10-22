@@ -60,6 +60,22 @@ export function translatedSelection(
       blockId: block.id,
       sourceHash: translation.sourceHash,
       sentenceIndexes,
+      wholeSentence:
+        quote ===
+        sentenceIndexes
+          .map(
+            (i) =>
+              node.querySelector(`[data-sentence="${i}"]`)?.textContent ?? "",
+          )
+          .join("")
+          .trim(),
+      sourceText: sentenceIndexes
+        .map((i) => sentenceAnchor(translation.sentences[i]))
+        .join(""),
+      // Offsets are paragraph-relative: an earlier sentence can move this mark.
+      targetText: translation.sentences
+        .map((sentence) => sentence.target)
+        .join(""),
       start,
       end: start + clipped.toString().length,
       quote,

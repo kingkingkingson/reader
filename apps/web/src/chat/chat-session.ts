@@ -1,5 +1,6 @@
 import { api, chat, type ChatStreamEvent } from "@reader/api";
 import type {
+  ChatRun,
   DocumentLocation,
   ImageAttachment,
   Message,
@@ -48,6 +49,13 @@ export type ChatSnapshot = {
 };
 export interface ChatTransport {
   messages: typeof api.messages;
+  latestRun?: () => Promise<ChatRun | undefined>;
+  resume?: (
+    run: ChatRun,
+    signal: AbortSignal,
+    emit: (event: ChatStreamEvent) => void,
+  ) => Promise<void>;
+  cancel?: () => Promise<unknown>;
   stream: (
     id: string,
     input: ChatInput,
@@ -98,6 +106,7 @@ export class ChatSession {
   constructor(
     readonly documentId: string,
     private io = transport,
+    readonly sessionId?: string,
   ) {}
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => {
@@ -128,12 +137,13 @@ export class ChatSession {
     return AbortSignal.any([this.query.signal, AbortSignal.timeout(15_000)]);
   }
   async load() {
+    if (this.state.busy) return;
     const serial = ++this.serial;
     try {
-      const messages = await this.io.messages(
-        this.documentId,
-        this.querySignal(),
-      );
+      const [messages, run] = await Promise.all([
+        this.io.messages(this.documentId, this.querySignal()),
+        this.io.latestRun?.(),
+      ]);
       if (this.alive && serial === this.serial) {
         const last = messages.at(-1);
         const messageKeys = { ...this.state.messageKeys };
@@ -163,6 +173,23 @@ export class ChatSession {
           loaded: true,
           loadError: undefined,
         });
+        if (run?.status === "running" && this.current(serial)) {
+          const question = messages.find((m) => m.id === run.userMessageId);
+          if (question)
+            void this.generate(
+              {
+                userMessageId: question.id,
+                provider: run.provider,
+                prompt: question.content,
+                context: question.context ?? "",
+                references: question.references ?? [],
+                attachments: question.attachments ?? [],
+                readingLocation: question.readingLocation,
+              },
+              this.active,
+              run,
+            );
+        }
       }
     } catch (error) {
       if (this.alive && serial === this.serial)
@@ -189,7 +216,11 @@ export class ChatSession {
       userMessageId: crypto.randomUUID().replaceAll("-", ""),
     });
   }
-  private async generate(input: ChatInput, replacing?: PendingAnswer) {
+  private async generate(
+    input: ChatInput,
+    replacing?: PendingAnswer,
+    resumeRun?: ChatRun,
+  ) {
     const serial = ++this.serial;
     const controller = new AbortController();
     const pending: PendingAnswer = {
@@ -274,7 +305,10 @@ export class ChatSession {
       this.flush();
     };
     try {
-      await this.io.stream(this.documentId, input, controller.signal, emit);
+      if (resumeRun && this.io.resume)
+        await this.io.resume(resumeRun, controller.signal, emit);
+      else
+        await this.io.stream(this.documentId, input, controller.signal, emit);
       if (!this.current(serial)) return;
       if (!terminal && !controller.signal.aborted) {
         pending.phase = "unconfirmed";
@@ -312,10 +346,21 @@ export class ChatSession {
       this.publish({ busy: false });
       return;
     }
-    if (!pending || pending.phase !== "generating") return;
+    if (
+      !pending ||
+      (pending.phase !== "generating" &&
+        !(this.io.cancel && pending.phase === "unconfirmed"))
+    )
+      return;
     pending.phase = "cancelled";
     pending.notice = "已停止；正在核对保存状态";
-    pending.controller.abort();
+    if (this.io.cancel) {
+      void this.io.cancel().catch((error: Error) => {
+        pending.phase = "unconfirmed";
+        pending.notice = `停止状态未确认：${error.message}`;
+        this.flush();
+      });
+    } else pending.controller.abort();
     this.flush();
   }
   retrySync = async () => {
@@ -354,7 +399,20 @@ export class ChatSession {
       this.publish({ busy: false });
       return;
     }
-    await this.generate({ ...pending.input, provider }, pending);
+    try {
+      const run = await this.io.latestRun?.();
+      if (!this.current(serial)) return;
+      if (run?.status === "running" && this.io.resume) {
+        await this.generate(
+          { ...pending.input, provider: run.provider },
+          pending,
+          run,
+        );
+      } else await this.generate({ ...pending.input, provider }, pending);
+    } catch (error) {
+      if (this.current(serial)) this.publish({ busy: false });
+      throw error;
+    }
   };
   private async reconcile(serial: number, pending: PendingAnswer) {
     try {
@@ -378,7 +436,11 @@ export class ChatSession {
         !!user &&
         assistants.length === 1 &&
         user.content === pending.input.prompt &&
-        messages.every((message) => message.documentId === this.documentId);
+        messages.every(
+          (message) =>
+            message.documentId === this.documentId &&
+            (!this.sessionId || message.sessionId === this.sessionId),
+        );
       pending.regenerationBlocked =
         userIndex >= 0 &&
         !associated &&

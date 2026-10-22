@@ -10,7 +10,10 @@ export const ChatCitationNavigation = createContext<
   | undefined
 >(undefined);
 
-const citation = /\[S[1-9][0-9]*\]|[^]*(?:|)/g;
+// Keep paired native forms aligned with document_citations.go.
+const sourceList = String.raw`S[1-9][0-9]*(?:[ \t]*[,，、;；][ \t]*S[1-9][0-9]*)*`;
+const nativeCitation = String.raw`\[${sourceList}\]|【${sourceList}】|［${sourceList}］|（${sourceList}）|\(${sourceList}\)`;
+const citation = new RegExp(`${nativeCitation}|[^]*(?:|)`, "g");
 const sourceID = /^S[1-9][0-9]*$/;
 const text = (value: string): Text => ({ type: "text", value });
 
@@ -31,10 +34,11 @@ export function remarkChatCitations({
         parts.push(text(node.value.slice(start, match.index)));
         const raw = match[0];
         start = match.index + raw.length;
+        const native = !raw.startsWith("");
         const markerParts = raw.replace(/^|$/g, "").split("");
         const kind = markerParts[0];
         if (
-          !raw.startsWith("[") &&
+          !native &&
           !["cite", "filecite"].some(
             (name) => name.startsWith(kind) || kind.startsWith(name),
           )
@@ -42,14 +46,14 @@ export function remarkChatCitations({
           parts.push(text(raw));
           continue;
         }
-        const complete = raw.startsWith("[") || raw.endsWith("");
-        const ids = raw.startsWith("[")
-          ? [raw.slice(1, -1)]
+        const complete = native || raw.endsWith("");
+        const ids = native
+          ? (raw.match(/S[1-9][0-9]*/g) ?? [])
           : markerParts.slice(1);
         if (!complete) {
           parts.push(text(generating ? "" : "[引用未完成]"));
         } else if (
-          (!raw.startsWith("[") && kind !== "cite" && kind !== "filecite") ||
+          (!native && kind !== "cite" && kind !== "filecite") ||
           !ids.length ||
           !ids.every((id) => sourceID.test(id))
         ) {

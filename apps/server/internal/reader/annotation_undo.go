@@ -193,6 +193,10 @@ func (s *Server) undoAnnotation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "无法读取恢复后的批注")
 		return
 	}
+	if _, err = tx.Exec("INSERT INTO annotation_recovery(document_id,checked) VALUES(?,0) ON CONFLICT(document_id) DO UPDATE SET checked=0", document); err != nil {
+		fail(w, 500, "无法撤销批注")
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		fail(w, 500, "无法撤销批注")
 		return

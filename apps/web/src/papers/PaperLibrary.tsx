@@ -1,4 +1,5 @@
 import { PaperColumns, usePaperColumns } from "./PaperColumns";
+import { setPaperDragImage } from "./paper-drag-image";
 import type { TableColumn } from "./columns";
 import { PaperTagFilterButton } from "./PaperTagFilter";
 import { Badge } from "@reader/ui/components/badge";
@@ -19,6 +20,7 @@ import {
   CheckSquare,
   List,
   Table2,
+  FileDown,
   FolderMinus,
   FolderPlus,
   Loader2,
@@ -45,7 +47,6 @@ import type {
   PaperColumn,
   PaperSort,
   Processing,
-  ReadingStatus,
 } from "@reader/core";
 import { Button } from "@reader/ui/components/button";
 import { Checkbox } from "@reader/ui/components/checkbox";
@@ -82,6 +83,7 @@ import {
 } from "@reader/ui/components/dropdown-menu";
 import { useReaderStore } from "../store";
 import { TrashView } from "../TrashView";
+import { exportAnnotatedPDFWithToast } from "../annotated-pdf-export";
 import { trashWithUndo } from "../library-actions";
 import { toast } from "sonner";
 import {
@@ -94,7 +96,6 @@ import {
   savePaperPreferences,
   toggleTagFor,
   toggleCategoryFor,
-  setReadingStatus,
   setStarred,
 } from "./actions";
 import {
@@ -174,9 +175,6 @@ export function PaperLibrary({
   const sort: PaperSort = prefs.sort || "opened";
   const reverse = !!prefs.sortReverse;
   const columnControls = usePaperColumns(prefs);
-  const columns = columnControls.visible.filter(
-    (c): c is PaperColumn => c !== "title",
-  );
   const ui = usePaperUI();
   const {
     view,
@@ -255,6 +253,24 @@ export function PaperLibrary({
   const visibleIds = visible.map((d) => d.id);
   const selected = documents.find((d) => d.id === selectedId);
   const pickedDocs = documents.filter((d) => picked.has(d.id));
+  const pickedById = new Map(pickedDocs.map((doc) => [doc.id, doc]));
+  const pickedPDFs = [...picked]
+    .map((id) => pickedById.get(id))
+    .filter((doc): doc is Document => doc?.type === "pdf");
+  const [exportingPDFs, setExportingPDFs] = useState(false);
+  const pdfExportRunning = useRef(false);
+  const exportPickedPDFs = async () => {
+    if (pdfExportRunning.current || !pickedPDFs.length) return;
+    pdfExportRunning.current = true;
+    setExportingPDFs(true);
+    try {
+      // Each export reports its own result and handles failure before continuing.
+      for (const doc of pickedPDFs) await exportAnnotatedPDFWithToast(doc);
+    } finally {
+      pdfExportRunning.current = false;
+      setExportingPDFs(false);
+    }
+  };
   const categories = paperCategories(prefs, documents);
   const category = view.startsWith("folder:") ? view.slice(7) : "";
   const smart = prefs.smartCategories || [];
@@ -345,15 +361,19 @@ export function PaperLibrary({
   }, [selectedId, ui]);
   // Widths follow the pointer locally and are saved once the drag ends.
   const [draftWidths, setDraftWidths] =
-    useState<Partial<Record<PaperColumn, number>>>();
+    useState<Partial<Record<TableColumn, number>>>();
   const [draftDetail, setDraftDetail] = useState<number>();
   const columnWidths = {
     ...defaultColumnWidths,
     ...prefs.columnWidths,
     ...draftWidths,
   };
+  const tableWidth = columnControls.visible.reduce(
+    (sum, c) => sum + (columnWidths[c] ?? 160),
+    32 + (picking ? 32 : 0),
+  );
   const detailWidth = draftDetail ?? prefs.detailWidth;
-  const saveColumnWidths = (next: Partial<Record<PaperColumn, number>>) =>
+  const saveColumnWidths = (next: Partial<Record<TableColumn, number>>) =>
     void savePaperPreferences((p) => ({
       ...p,
       columnWidths: { ...p.columnWidths, ...next },
@@ -368,10 +388,10 @@ export function PaperLibrary({
   const resizeColumn = (
     e: ReactPointerEvent<HTMLElement>,
     left: "title" | PaperColumn,
-    right: TableColumn,
+    right: TableColumn | undefined,
   ) => {
     const start = headerWidths(e.currentTarget);
-    let next: Partial<Record<PaperColumn, number>> = {};
+    let next: Partial<Record<TableColumn, number>> = {};
     dragHorizontally(
       e,
       (dx) => {
@@ -387,7 +407,7 @@ export function PaperLibrary({
   const nudgeColumn = (
     e: ReactKeyboardEvent<HTMLElement>,
     left: "title" | PaperColumn,
-    right: TableColumn,
+    right: TableColumn | undefined,
   ) => {
     const dx = { ArrowLeft: -resizeStep, ArrowRight: resizeStep }[e.key];
     if (!dx) return;
@@ -743,6 +763,20 @@ export function PaperLibrary({
                   已选 {picked.size} 篇
                 </span>
                 <div className="ml-auto flex flex-wrap items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="导出带批注的 PDF"
+                    disabled={!pickedPDFs.length || exportingPDFs}
+                    onClick={() => void exportPickedPDFs()}
+                  >
+                    {exportingPDFs ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <FileDown />
+                    )}
+                    {exportingPDFs ? "正在导出…" : "导出"}
+                  </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
@@ -754,7 +788,7 @@ export function PaperLibrary({
                       }
                     >
                       <FolderPlus />
-                      加入分类
+                      分类
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="max-h-80 w-48">
                       {flattenCategories(categoryTree(categories)).map(
@@ -796,35 +830,10 @@ export function PaperLibrary({
                       移出当前分类
                     </Button>
                   )}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={!pickedDocs.length}
-                        />
-                      }
-                    >
-                      阅读状态
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent>
-                      {(Object.keys(statusLabels) as ReadingStatus[]).map(
-                        (key) => (
-                          <DropdownMenuItem
-                            key={key}
-                            onClick={() =>
-                              void setReadingStatus(pickedDocs, key)
-                            }
-                          >
-                            标为{statusLabels[key]}
-                          </DropdownMenuItem>
-                        ),
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
                   <Button
-                    size="sm"
+                    size="icon-sm"
+                    aria-label="星标"
+                    title="星标"
                     variant="ghost"
                     disabled={!pickedDocs.length}
                     onClick={() =>
@@ -835,10 +844,11 @@ export function PaperLibrary({
                     }
                   >
                     <Star />
-                    星标
                   </Button>
                   <Button
-                    size="sm"
+                    size="icon-sm"
+                    aria-label="导出引用"
+                    title="导出引用"
                     variant="ghost"
                     disabled={!pickedDocs.length}
                     onClick={() =>
@@ -846,20 +856,20 @@ export function PaperLibrary({
                     }
                   >
                     <Quote />
-                    导出引用
                   </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
                         <Button
-                          size="sm"
+                          size="icon-sm"
+                          aria-label="标签"
+                          title="标签"
                           variant="ghost"
                           disabled={!pickedDocs.length}
                         />
                       }
                     >
                       <Tag />
-                      标签
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="max-h-80 w-48">
                       {tags.map((tag) => (
@@ -883,14 +893,15 @@ export function PaperLibrary({
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Button
-                    size="sm"
+                    size="icon-sm"
+                    aria-label="移到回收站"
+                    title="移到回收站"
                     variant="ghost"
                     className="text-destructive"
                     disabled={!pickedDocs.length}
                     onClick={() => void trashPapers(pickedDocs, true)}
                   >
                     <Trash2 />
-                    移到回收站
                   </Button>
                 </div>
               </div>
@@ -954,10 +965,14 @@ export function PaperLibrary({
                   <Table
                     {...columnControls.target()}
                     style={{
-                      minWidth:
-                        240 +
-                        (picking ? 32 : 0) +
-                        columns.reduce((sum, c) => sum + columnWidths[c], 0),
+                      // Keep the title flexible until first resized; afterwards
+                      // the table follows saved widths rather than redistributing them.
+                      width:
+                        columnWidths.title !== undefined ||
+                        !columnControls.visible.includes("title")
+                          ? tableWidth
+                          : undefined,
+                      minWidth: tableWidth,
                     }}
                   >
                     <caption className="sr-only">论文库</caption>
@@ -976,11 +991,7 @@ export function PaperLibrary({
                               key={c}
                               scope="col"
                               data-column={c}
-                              style={
-                                c === "title"
-                                  ? undefined
-                                  : { width: columnWidths[c] }
-                              }
+                              style={{ width: columnWidths[c] }}
                               aria-sort={
                                 active
                                   ? descending
@@ -1008,20 +1019,15 @@ export function PaperLibrary({
                                   )
                                 )}
                               </div>
-                              {/* The last column borders the menu column; the title absorbs its changes. */}
-                              {next && (
-                                <span
-                                  role="separator"
-                                  aria-orientation="vertical"
-                                  aria-label={`调整${c === "title" ? "标题" : columnLabels[c]}列宽度`}
-                                  tabIndex={0}
-                                  className="paper-column-resizer"
-                                  onPointerDown={(e) =>
-                                    resizeColumn(e, c, next)
-                                  }
-                                  onKeyDown={(e) => nudgeColumn(e, c, next)}
-                                />
-                              )}
+                              <span
+                                role="separator"
+                                aria-orientation="vertical"
+                                aria-label={`调整${c === "title" ? "标题" : columnLabels[c]}列宽度`}
+                                tabIndex={0}
+                                className="paper-column-resizer"
+                                onPointerDown={(e) => resizeColumn(e, c, next)}
+                                onKeyDown={(e) => nudgeColumn(e, c, next)}
+                              />
                             </TableHead>
                           );
                         })}
@@ -1035,7 +1041,11 @@ export function PaperLibrary({
                       {!visible.length && (
                         <TableRow>
                           <TableCell
-                            colSpan={columnControls.visible.length + 1 + (picking ? 1 : 0)}
+                            colSpan={
+                              columnControls.visible.length +
+                              1 +
+                              (picking ? 1 : 0)
+                            }
                           >
                             {emptyState}
                           </TableCell>
@@ -1281,6 +1291,8 @@ function PaperRow({
       {doc.type === "epub" ? <BookOpen /> : <FileText />}
     </span>
   );
+  const dragImage = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => () => dragImage.current?.(), []);
   const percent = paperProgress(doc.percentage);
   const check = picking && (
     <span className="paper-row-check" data-row-action>
@@ -1435,8 +1447,19 @@ function PaperRow({
         draggable
         aria-label={doc.title}
         onDragStart={(e) => {
-          e.dataTransfer.setData(PAPER_DRAG_TYPE, JSON.stringify(dragIds()));
+          const ids = dragIds();
+          e.dataTransfer.setData(PAPER_DRAG_TYPE, JSON.stringify(ids));
           e.dataTransfer.effectAllowed = "copy";
+          dragImage.current?.();
+          dragImage.current = setPaperDragImage(
+            e.dataTransfer,
+            doc.title,
+            ids.length,
+          );
+        }}
+        onDragEnd={() => {
+          dragImage.current?.();
+          dragImage.current = undefined;
         }}
         onClick={(e) => {
           if ((e.target as Element).closest("[data-row-action]")) return;

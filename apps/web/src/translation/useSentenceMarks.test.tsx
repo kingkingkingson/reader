@@ -33,7 +33,12 @@ const t: TranslationBlock = {
   sentences: [{ source: "Original sentence.", target: "翻译句子。" }],
 };
 const blocks = [
-  { id: t.blockId, page: 1, bounds: { x: 0, y: 0, width: 1, height: 1 } },
+  {
+    id: t.blockId,
+    text: "Original sentence.",
+    page: 1,
+    bounds: { x: 0, y: 0, width: 1, height: 1 },
+  },
 ] as PDFBlock[];
 const events = {
   location: vi.fn(),
@@ -441,3 +446,41 @@ it.each(["highlight", "underline", "note"] as const)(
     expect(events.annotationHover).toHaveBeenLastCalledWith(null);
   },
 );
+
+it("draws split source anchors independently of translation and linking settings", async () => {
+  const a: Annotation = {
+    id: "split-source",
+    documentId: "doc",
+    kind: "highlight",
+    quote: "Original sentence.",
+    note: "",
+    color: "#6cc58c",
+    createdAt: "",
+    location: {
+      type: "pdf",
+      page: 1,
+      sourceAnchors: [
+        {
+          blockId: "old-layout-id",
+          page: 1,
+          source: "Original sentence.",
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+        },
+      ],
+    },
+  };
+  await act(async () =>
+    root.render(<App linked={false} translations={[]} annotations={[a]} />),
+  );
+  const mark = [...registry.entries()].find(([name]) =>
+    name.includes("-highlight-"),
+  );
+  expect(mark).toBeDefined();
+  expect(texts(mark![1])).toEqual(["Original sentence."]);
+  await pointer("[data-source]", "pointermove", 10);
+  expect(events.annotationHover).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ids: ["split-source"] }),
+  );
+  await pointer("[data-sentence]", "pointermove", 210);
+  expect(events.annotationHover).toHaveBeenLastCalledWith(null);
+});

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"golang.org/x/net/html"
 )
@@ -276,55 +275,10 @@ func (s *Server) requestEPUBTranslationChapter(w http.ResponseWriter, r *http.Re
 	defer s.processingControlMu.Unlock()
 	s.processingMu.Lock()
 	defer s.processingMu.Unlock()
-	items, err := s.translations(d.ID, blocks)
+	result, err := s.queueTranslationInput(d, blocks[from:to])
 	if err != nil {
-		fail(w, 500, "无法读取译文")
+		fail(w, 500, "无法安排翻译任务")
 		return
 	}
-	byID := map[string]TranslationBlock{}
-	for _, t := range items {
-		byID[t.BlockID] = t
-	}
-	result := epubTranslationRange{}
-	for _, b := range blocks[from:to] {
-		t, ok := byID[b.ID]
-		if !ok || (t.Status != "idle" && t.Status != "failed") {
-			continue
-		}
-		cost := utf8.RuneCountInString(b.Text)
-		if result.Queued > 0 && result.Characters+cost > bookTranslationCharacters {
-			result.HasMore = true
-			break
-		}
-		t.Status, t.Error = "pending", ""
-		if err = s.saveTranslation(d.ID, t); err != nil {
-			fail(w, 500, "无法保存翻译任务")
-			return
-		}
-		result.Queued++
-		result.Characters += cost
-	}
-	// A requested chapter may already have pending rows from a paused run.
-	pending := result.Queued > 0
-	for _, b := range blocks[from:to] {
-		t := byID[b.ID]
-		pending = pending || t.Status == "pending" || t.Status == "running"
-	}
-	if pending {
-		if err = s.Store.enqueueDocument(d); err != nil {
-			fail(w, 500, "无法创建翻译任务")
-			return
-		}
-		p, e := s.Store.processing(d.ID)
-		if e != nil {
-			fail(w, 500, "无法读取处理状态")
-			return
-		}
-		p.enable, p.queueTranslation = true, true
-		if err = s.Store.saveProcessing(p); err != nil {
-			fail(w, 500, "无法安排翻译任务")
-			return
-		}
-	}
-	respond(w, 202, result)
+	respond(w, 202, epubTranslationRange{Queued: result.Queued, Characters: result.Characters})
 }

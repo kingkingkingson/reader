@@ -44,18 +44,20 @@ if (process.argv.includes("--upload")) {
     `v${version}`,
     "Release tag must match app version",
   );
-  const result = spawnSync(
-    "gh",
-    [
-      "release",
-      "upload",
-      process.env.RELEASE_TAG,
-      ...expected.map((file) => `release/${file}`),
-      "release/SHA256SUMS.txt",
-      "--clobber",
-    ],
-    { stdio: "inherit" },
-  );
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status || 1);
+  // Publish the discovery manifest only after every installer is available.
+  for (const files of [expected, ["SHA256SUMS.txt"]]) {
+    const result = spawnSync(
+      "gh",
+      [
+        "release",
+        "upload",
+        process.env.RELEASE_TAG,
+        ...files.map((file) => `release/${file}`),
+        "--clobber",
+      ],
+      { stdio: "inherit" },
+    );
+    if (result.error) throw result.error;
+    if (result.status !== 0) process.exit(result.status || 1);
+  }
 }

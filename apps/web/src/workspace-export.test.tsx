@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { defaultTheme, type Processing } from "@reader/core";
 import { TooltipProvider } from "@reader/ui/components/tooltip";
+import { api } from "@reader/api";
 import { Workspace } from "./Workspace";
 import { paper } from "./papers/fixtures";
 
@@ -14,6 +15,7 @@ vi.mock("@reader/api", () => ({
       models: {},
       capabilities: {},
     })),
+    recoverAnnotations: vi.fn(async () => ({ checked: true })),
     annotations: vi.fn(async () => []),
     messages: vi.fn(async () => []),
     blocks: vi.fn(async () => []),
@@ -86,6 +88,7 @@ const button = (text: string) =>
     (el) => el.textContent?.trim() === text,
   )!;
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("PointerEvent", MouseEvent);
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
@@ -144,3 +147,13 @@ it.each(["取消", "Close"])(
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
   },
 );
+
+it("checks annotations once on opening, before loading marks, not on progress updates", async () => {
+  await act(async () => render(0));
+  expect(api.recoverAnnotations).toHaveBeenCalledExactlyOnceWith(doc.id);
+  expect(
+    vi.mocked(api.recoverAnnotations).mock.invocationCallOrder[0],
+  ).toBeLessThan(vi.mocked(api.annotations).mock.invocationCallOrder[0]);
+  await act(async () => render(1));
+  expect(api.recoverAnnotations).toHaveBeenCalledTimes(1);
+});

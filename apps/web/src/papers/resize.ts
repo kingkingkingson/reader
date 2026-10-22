@@ -38,25 +38,28 @@ export function dragHorizontally(
 
 /**
  * Moves the boundary between two adjacent columns by dx. The table fills its
- * width and the title column takes whatever the fixed columns leave, so only
- * fixed columns get stored widths; the boundary follows the pointer exactly.
+ * width while both neighbouring widths are saved explicitly. The last column
+ * can grow into horizontal scroll space without changing the menu column.
  */
 export function resizeBoundary(
   widths: Partial<Record<"title" | PaperColumn, number>>,
   left: "title" | PaperColumn,
-  right: "title" | PaperColumn,
+  right: "title" | PaperColumn | undefined,
   dx: number,
-): Partial<Record<PaperColumn, number>> {
-  const l = widths[left] ?? 0,
-    r = widths[right] ?? 0;
+): Partial<Record<"title" | PaperColumn, number>> {
+  const l = widths[left] ?? 0;
+  if (!right) {
+    // Fix the measured title too, otherwise its flex width absorbs this drag.
+    return {
+      ...(widths.title !== undefined ? { title: widths.title } : {}),
+      [left]: Math.round(Math.max(minWidth(left), l + dx)),
+    };
+  }
+  const r = widths[right] ?? 0;
   const moved = Math.round(
     Math.min(Math.max(dx, minWidth(left) - l), r - minWidth(right)),
   );
-  return left === "title"
-    ? { [right]: r - moved }
-    : right === "title"
-      ? { [left]: l + moved }
-      : { [left]: l + moved, [right]: r - moved };
+  return { [left]: l + moved, [right]: r - moved };
 }
 
 export const clampDetailWidth = (width: number) =>

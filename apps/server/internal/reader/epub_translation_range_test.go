@@ -182,18 +182,18 @@ func TestEPUBManualMigrationPausesOldWorkOnce(t *testing.T) {
 	}
 }
 
-func TestEPUBChapterLimitContinuesWithoutRetranslating(t *testing.T) {
+func TestEPUBQueuesWholeLongChapterWithoutDuplicatingPendingWork(t *testing.T) {
 	s, _ := epubRangeFixture(t, nil)
 	source := `<html><body><p>` + strings.Repeat("字", 25000) + `</p><p>` + strings.Repeat("另", 25000) + `</p></body></html>`
 	if err := os.WriteFile(filepath.Join(s.Store.Root, "cache", "doc", "a.xhtml"), []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	code, first := requestEPUBChapter(t, s, EPUBReadingLocation{Type: "epub", Href: "a.xhtml"})
-	if code != 202 || first.Queued != 1 || first.Characters != 25000 || !first.HasMore {
+	if code != 202 || first.Queued != 2 || first.Characters != 50000 || first.HasMore {
 		t.Fatalf("%d %+v", code, first)
 	}
 	code, second := requestEPUBChapter(t, s, EPUBReadingLocation{Type: "epub", Href: "a.xhtml"})
-	if code != 202 || second.Queued != 1 || second.HasMore {
+	if code != 202 || second.Queued != 0 || second.HasMore {
 		t.Fatalf("%d %+v", code, second)
 	}
 }

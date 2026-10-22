@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net"
@@ -33,7 +34,15 @@ func main() {
 	probeNetwork := flag.Bool("probe-network", false, "check ChatGPT reachability and exit without opening a library")
 	logs := flag.String("logs", "", "diagnostic log directory")
 	session := flag.String("session", "", "diagnostic session ID")
+	migrateLibrary := flag.String("migrate-library", "", "copy a stopped library to a new directory and exit")
+	shutdownOnStdin := flag.Bool("shutdown-on-stdin", false, "shut down when the desktop closes stdin")
 	flag.Parse()
+	if *migrateLibrary != "" {
+		if err := reader.CopyLibrary(*data, *migrateLibrary); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if *probeNetwork {
 		_ = json.NewEncoder(os.Stdout).Encode(networkprobe.Run(context.Background()))
 		return
@@ -108,6 +117,12 @@ func main() {
 	fmt.Println(string(ready))
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	if *shutdownOnStdin {
+		go func() {
+			_, _ = io.Copy(io.Discard, os.Stdin)
+			stop <- os.Interrupt
+		}()
+	}
 	go func() {
 		<-stop
 		slog.Info("server.stopping")

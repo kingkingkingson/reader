@@ -14,6 +14,16 @@ export async function copyText(text: string, successMessage?: string) {
 }
 export async function copyImage(url: string, text: string) {
   try {
+    if (window.readerDesktop?.writeClipboardImage) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(response.statusText);
+      await window.readerDesktop.writeClipboardImage(
+        new Uint8Array(await response.arrayBuffer()),
+        text,
+      );
+      toast.success("已复制图片", { id: "reader-clipboard" });
+      return;
+    }
     // Pass the blob as a promise so Safari keeps the click's user activation.
     const image = fetch(url).then((response) => {
       if (!response.ok) throw new Error(response.statusText);

@@ -4,6 +4,65 @@
   "security": [{ "session": [] }],
   "paths":
     {
+      "/api/documents/{id}/annotations/recover":
+        {
+          "post":
+            {
+              "summary": "Recover translated annotations and split legacy linked marks",
+              "parameters":
+                [
+                  {
+                    "name": "id",
+                    "in": "path",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "force":
+                                    { "type": "boolean", "default": false },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "checked=false while processing or data is unavailable; no records deleted",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["checked"],
+                                  "properties":
+                                    { "checked": { "type": "boolean" } },
+                                },
+                            },
+                        },
+                    },
+                  "409":
+                    {
+                      "description": "Annotation check or retranslation is already starting",
+                    },
+                },
+            },
+        },
       "/api/translate-selection":
         {
           "post":
@@ -956,6 +1015,16 @@
                                       "enum": ["1"],
                                       "description": "Confirms a paper over 100 pages or 100 MB. Without it such a paper fails with 409, code large-paper and its page count.",
                                     },
+                                  "folder":
+                                    {
+                                      "type": "string",
+                                      "description": "Optional target paper category. Applied only to a newly imported paper; an existing document keeps its folders.",
+                                    },
+                                  "smartCategory":
+                                    {
+                                      "type": "string",
+                                      "description": "Saved smart category ID, mutually exclusive with folder. Its required tags are applied atomically to a newly imported paper. Existing documents keep their tags.",
+                                    },
                                 },
                               "required": ["file"],
                             },
@@ -1782,6 +1851,55 @@
                     "schema": { "type": "string" },
                   },
                 ],
+            },
+        },
+      "/api/documents/{id}/codex-handoff":
+        {
+          "post":
+            {
+              "description": "Fork the last committed Codex reading turn into an independent conversation with local document and chat snapshots. Does not generate a model answer or change the Reader conversation. Repeated requests for the same snapshot reuse the fork.",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "query",
+                    "name": "sessionId",
+                    "required": false,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Prepared independent Codex conversation",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/CodexHandoff" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Document unavailable, no committed Codex conversation, active generation, or handoff failed",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
             },
         },
       "/api/documents/{id}/chat":
@@ -2944,7 +3062,7 @@
         {
           "post":
             {
-              "description": "Queue the EPUB chapter at this location. Top-level TOC boundaries (children of a sole book-title parent) take precedence; without a TOC use the spine file. Queues at most approximately 40000 Unicode source characters, retaining whole paragraphs and completed results. Resumes paused work. No PDF page numbers.",
+              "description": "Queue the entire EPUB chapter at this location through the shared translation workers, retaining completed results. Top-level TOC boundaries (children of a sole book-title parent) take precedence; without a TOC use the spine file. Resumes paused work. No PDF page numbers.",
               "parameters":
                 [
                   {
@@ -3013,7 +3131,7 @@
                                       "hasMore":
                                         {
                                           "type": "boolean",
-                                          "description": "Request this chapter again to queue the remaining text after the character limit.",
+                                          "description": "Legacy compatibility field; always false because the entire chapter is queued.",
                                         },
                                     },
                                 },
@@ -3039,7 +3157,7 @@
         {
           "post":
             {
-              "description": "Queue untranslated paragraphs and formulas in a page range, in reading order, starting at the first unfinished page and covering at most 30 pages and 40000 source characters. Book pages that were never parsed are parsed first. Also resumes paused processing.",
+              "description": "Queue all untranslated paragraphs and formulas in the requested page range through the shared translation workers, retaining completed results. Missing book pages are parsed first in automatic batches of at most 30 pages. Also resumes paused processing.",
               "parameters":
                 [
                   {
@@ -3096,12 +3214,12 @@
                                       "nextPage":
                                         {
                                           "type": "integer",
-                                          "description": "Page where the character or 30-page limit stopped the request; 0 when the range is fully queued.",
+                                          "description": "Legacy compatibility field; always 0 because the entire range is queued.",
                                         },
                                       "parsing":
                                         {
                                           "type": "boolean",
-                                          "description": "Book pages in the window are parsed first (at most 30 pages); translation is queued when parsing finishes.",
+                                          "description": "Missing book pages in the requested range are parsed first in automatic batches; translation is queued when parsing finishes.",
                                         },
                                     },
                                 },
@@ -4013,6 +4131,16 @@
                                     },
                                   "allowLarge":
                                     { "type": "boolean", "default": false },
+                                  "folder":
+                                    {
+                                      "type": "string",
+                                      "description": "Optional target paper category. Applied only to a newly imported paper; an existing document keeps its folders.",
+                                    },
+                                  "smartCategory":
+                                    {
+                                      "type": "string",
+                                      "description": "Saved smart category ID, mutually exclusive with folder. Its required tags are applied atomically to a newly imported paper. Existing documents keep their tags.",
+                                    },
                                 },
                               "required": ["ref"],
                             },
@@ -4391,12 +4519,524 @@
                 },
             },
         },
+      "/api/documents/{id}/chat-sessions":
+        {
+          "get":
+            {
+              "summary": "List sessions and latest run; atomically migrate old chat to a default session",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    {
+                                      "$ref": "#/components/schemas/DocumentChatSession",
+                                    },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+          "post":
+            {
+              "summary": "Create an independent document chat",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties":
+                                {
+                                  "title":
+                                    { "type": "string", "maxLength": 80 },
+                                  "provider":
+                                    {
+                                      "enum":
+                                        ["api", "codex", "claude", "kimi"],
+                                    },
+                                },
+                              "required": ["provider"],
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "201":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentChatSession",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/chat-sessions/{session}":
+        {
+          "patch":
+            {
+              "summary": "Rename a session or change its backend while idle",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties":
+                                {
+                                  "title":
+                                    { "type": "string", "maxLength": 80 },
+                                  "provider":
+                                    {
+                                      "enum":
+                                        ["api", "codex", "claude", "kimi"],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "$ref": "#/components/schemas/DocumentChatSession",
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/chat-sessions/{session}/messages":
+        {
+          "get":
+            {
+              "summary": "Read one session transcript",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "array",
+                                  "items":
+                                    { "$ref": "#/components/schemas/Message" },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/chat-sessions/{session}/chat":
+        {
+          "post":
+            {
+              "responses":
+                {
+                  "202":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/ChatRun" },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "requestBody":
+                {
+                  "required": true,
+                  "content":
+                    {
+                      "application/json":
+                        {
+                          "schema":
+                            {
+                              "type": "object",
+                              "properties":
+                                {
+                                  "provider":
+                                    {
+                                      "enum":
+                                        ["codex", "claude", "kimi", "api"],
+                                    },
+                                  "attachments":
+                                    {
+                                      "type": "array",
+                                      "maxItems": 4,
+                                      "items":
+                                        {
+                                          "type": "string",
+                                          "pattern": "^p[1-9][0-9]*-b[1-9][0-9]*$",
+                                        },
+                                    },
+                                  "userMessageId":
+                                    {
+                                      "type": "string",
+                                      "pattern": "^[a-f0-9]{32}$",
+                                      "description": "Stable client-generated user message ID. Reuse only for explicit regeneration of the same unanswered last question, with unchanged prompt, context, references, attachments and reading location. The server uses current model settings, does not insert a duplicate question, and returns 409 if the turn has an answer or later messages. Omit for legacy clients.",
+                                    },
+                                  "prompt": { "type": "string" },
+                                  "context": { "type": "string" },
+                                  "readingLocation":
+                                    {
+                                      "$ref": "#/components/schemas/DocumentLocation",
+                                      "description": "Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence.",
+                                    },
+                                  "references":
+                                    {
+                                      "type": "array",
+                                      "items":
+                                        {
+                                          "type": "object",
+                                          "properties":
+                                            {
+                                              "text": { "type": "string" },
+                                              "kind":
+                                                {
+                                                  "enum":
+                                                    ["selection", "section"],
+                                                },
+                                              "location":
+                                                {
+                                                  "$ref": "#/components/schemas/DocumentLocation",
+                                                },
+                                              "sourceId": { "type": "string" },
+                                              "pageImage":
+                                                {
+                                                  "$ref": "#/components/schemas/PageImageEvidence",
+                                                },
+                                              "corpusRevision":
+                                                { "type": "string" },
+                                              "contentHash":
+                                                { "type": "string" },
+                                              "precision":
+                                                {
+                                                  "type": "string",
+                                                  "enum":
+                                                    [
+                                                      "page",
+                                                      "block",
+                                                      "paragraph",
+                                                    ],
+                                                },
+                                            },
+                                          "required": ["text", "location"],
+                                        },
+                                    },
+                                },
+                              "required": ["provider", "prompt", "context"],
+                            },
+                        },
+                    },
+                },
+              "summary": "Start a server-owned run; one active run per session, at most four globally",
+            },
+        },
+      "/api/documents/{id}/chat-sessions/{session}/runs/{run}/events":
+        {
+          "get":
+            {
+              "summary": "Replay and subscribe to a run; disconnecting never cancels it",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "run",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Incremental ChatStream SSE; done follows successful persistence",
+                      "content":
+                        {
+                          "text/event-stream":
+                            { "schema": { "type": "string" } },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+      "/api/documents/{id}/chat-sessions/{session}/runs/{run}/cancel":
+        {
+          "post":
+            {
+              "summary": "Cancel this run and wait for it to settle",
+              "parameters":
+                [
+                  {
+                    "in": "path",
+                    "name": "id",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "session",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                  {
+                    "in": "path",
+                    "name": "run",
+                    "required": true,
+                    "schema": { "type": "string" },
+                  },
+                ],
+              "responses":
+                {
+                  "200":
+                    {
+                      "description": "Success",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                {
+                                  "type": "object",
+                                  "required": ["ok"],
+                                  "properties": { "ok": { "type": "boolean" } },
+                                },
+                            },
+                        },
+                    },
+                  "default":
+                    {
+                      "description": "Error",
+                      "content":
+                        {
+                          "application/json":
+                            {
+                              "schema":
+                                { "$ref": "#/components/schemas/Error" },
+                            },
+                        },
+                    },
+                },
+            },
+        },
     },
   "components":
     {
       "securitySchemes": { "session": { "type": "http", "scheme": "bearer" } },
       "schemas":
         {
+          "CodexHandoff":
+            {
+              "type": "object",
+              "required": ["threadId", "url", "directory"],
+              "properties":
+                {
+                  "threadId": { "type": "string", "format": "uuid" },
+                  "url":
+                    {
+                      "type": "string",
+                      "description": "Local codex://threads/<threadId> link",
+                    },
+                  "directory":
+                    {
+                      "type": "string",
+                      "description": "Absolute path of the independent document snapshot",
+                    },
+                },
+            },
           "OverviewContent":
             {
               "type": "object",
@@ -4493,7 +5133,6 @@
                             },
                         },
                     },
-
                   "documentId": { "type": "string" },
                   "corpusRevision": { "type": "string" },
                   "compilerVersion": { "type": "string" },
@@ -4595,7 +5234,6 @@
                   "totalPassages",
                 ],
             },
-
           "JournalRankConfig":
             {
               "type": "object",
@@ -4763,6 +5401,35 @@
                     "properties":
                       {
                         "type": { "const": "pdf" },
+                        "sourceAnchors":
+                          {
+                            "type": "array",
+                            "items":
+                              {
+                                "type": "object",
+                                "required":
+                                  ["blockId", "source", "page", "bounds"],
+                                "properties":
+                                  {
+                                    "blockId": { "type": "string" },
+                                    "source": { "type": "string" },
+                                    "page": { "type": "integer" },
+                                    "bounds":
+                                      {
+                                        "type": "object",
+                                        "required":
+                                          ["x", "y", "width", "height"],
+                                        "properties":
+                                          {
+                                            "x": { "type": "number" },
+                                            "y": { "type": "number" },
+                                            "width": { "type": "number" },
+                                            "height": { "type": "number" },
+                                          },
+                                      },
+                                  },
+                              },
+                          },
                         "page": { "type": "integer", "minimum": 1 },
                         "x": { "type": "number" },
                         "y": { "type": "number" },
@@ -5129,6 +5796,11 @@
                           "required": ["text", "location"],
                         },
                     },
+                  "sessionId":
+                    {
+                      "type": "string",
+                      "description": "Stable side chat session identity; omitted only by legacy clients.",
+                    },
                 },
               "required": ["id", "documentId", "role", "content", "createdAt"],
             },
@@ -5168,7 +5840,6 @@
                           },
                       },
                   },
-
                   {
                     "type": "object",
                     "required": ["event", "data"],
@@ -5187,7 +5858,6 @@
                           },
                       },
                   },
-
                   {
                     "type": "object",
                     "additionalProperties": false,
@@ -5519,7 +6189,6 @@
                       "description": "Provider-reported context capacity; omitted when unavailable",
                     },
                   "maxOutputTokens": { "type": "integer" },
-
                   "effortInfo":
                     {
                       "type": "object",
@@ -6005,6 +6674,11 @@
                 {
                   "blockId": { "type": "string" },
                   "sourceHash": { "type": "string" },
+                  "sourceText": { "type": "string" },
+                  "targetText": { "type": "string" },
+                  "recovered": { "type": "boolean" },
+                  "wholeSentence": { "type": "boolean" },
+                  "matchedQuote": { "type": "string" },
                   "sentenceIndexes":
                     {
                       "type": "array",
@@ -6031,6 +6705,11 @@
                             {
                               "blockId": { "type": "string" },
                               "sourceHash": { "type": "string" },
+                              "sourceText": { "type": "string" },
+                              "targetText": { "type": "string" },
+                              "recovered": { "type": "boolean" },
+                              "wholeSentence": { "type": "boolean" },
+                              "matchedQuote": { "type": "string" },
                               "sentenceIndexes":
                                 {
                                   "type": "array",
@@ -6139,6 +6818,65 @@
                   "image": { "type": "string" },
                 },
               "required": ["id", "label", "text", "location"],
+            },
+          "ChatRun":
+            {
+              "type": "object",
+              "required":
+                [
+                  "id",
+                  "sessionId",
+                  "documentId",
+                  "userMessageId",
+                  "provider",
+                  "status",
+                  "startedAt",
+                ],
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "sessionId": { "type": "string" },
+                  "documentId": { "type": "string" },
+                  "userMessageId": { "type": "string" },
+                  "provider": { "type": "string" },
+                  "status":
+                    {
+                      "enum":
+                        [
+                          "running",
+                          "completed",
+                          "failed",
+                          "cancelled",
+                          "interrupted",
+                        ],
+                    },
+                  "error": { "type": "string" },
+                  "startedAt": { "type": "string" },
+                  "finishedAt": { "type": "string" },
+                },
+            },
+          "DocumentChatSession":
+            {
+              "type": "object",
+              "required":
+                [
+                  "id",
+                  "documentId",
+                  "title",
+                  "provider",
+                  "createdAt",
+                  "updatedAt",
+                ],
+              "properties":
+                {
+                  "id": { "type": "string" },
+                  "documentId": { "type": "string" },
+                  "title": { "type": "string" },
+                  "provider": { "type": "string" },
+                  "createdAt": { "type": "string" },
+                  "updatedAt": { "type": "string" },
+                  "latestRun": { "$ref": "#/components/schemas/ChatRun" },
+                },
             },
         },
     },

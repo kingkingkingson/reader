@@ -34,6 +34,8 @@ func TestProviderErrorsAreClassifiedAndRedacted(t *testing.T) {
 		{"https://generativelanguage.googleapis.com/v1beta", 400, `{"error":{"code":400,"status":"INVALID_ARGUMENT","message":"Invalid thinking.type private paper"}}`, ErrorConfiguration, "thinking.type"},
 		{"https://api.minimax.io/v1", 200, `{"base_resp":{"status_code":2013,"status_msg":"Invalid reasoning_effort private paper"}}`, ErrorConfiguration, "reasoning_effort"},
 		{"https://relay.test/v1", 429, `{"error":{"code":"1113"}}`, ErrorLimit, ""},
+		{"https://relay.test/v1", 408, `request timeout`, ErrorTimeout, ""},
+		{"https://relay.test/v1", 504, `<html>gateway timeout</html>`, ErrorTimeout, ""},
 		{"https://relay.test/v1", 502, `<html>SECRET_KEY private paper</html>`, ErrorUpstream, ""},
 		{"https://relay.test/v1", 403, `{"error":{"type":"permission_denied_error"}}`, ErrorPermission, ""},
 		{"https://relay.test/v1", 400, `{"error":{"code":"private-paper","param":"private-paper","type":"private-paper"}}`, ErrorConfiguration, ""},
@@ -44,6 +46,9 @@ func TestProviderErrorsAreClassifiedAndRedacted(t *testing.T) {
 			err := providerFailure(ctx, c, tt.status, http.Header{"X-Request-Id": []string{"req_123"}}, []byte(tt.body), "http")
 			if errorKind(err) != tt.kind {
 				t.Fatalf("%v want %s", err, tt.kind)
+			}
+			if tt.kind == ErrorTimeout && !strings.HasPrefix(err.Error(), "上游请求超时") {
+				t.Fatalf("timeout has no readable explanation: %v", err)
 			}
 			if err.(*apiFailure).Param != tt.param {
 				t.Fatal(err)
@@ -59,7 +64,7 @@ func TestProviderErrorsAreClassifiedAndRedacted(t *testing.T) {
 		}
 	}
 	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
-	if len(lines) != 11 {
+	if len(lines) != 13 {
 		t.Fatal(len(lines))
 	}
 	for _, line := range lines {

@@ -359,3 +359,88 @@ describe("chat request lifecycle", () => {
     expect(h.session.getSnapshot().archived[0].content).toBe("partial");
   });
 });
+
+describe("independent session lifecycle", () => {
+  it("keeps the original stream running while another session loads and cancels", async () => {
+    const a = setup(),
+      b = setup();
+    await a.session.load();
+    await b.session.load();
+    const first = a.session.send({ ...input, prompt: "alpha" });
+    const second = b.session.send({ ...input, prompt: "beta" });
+    // No dispose occurs when a view changes its subscription.
+    const unsubscribe = a.session.subscribe(() => {});
+    unsubscribe();
+    b.session.cancel();
+    expect(a.session.getSnapshot().busy).toBe(true);
+    expect(a.session.getSnapshot().pending?.controller.signal.aborted).toBe(
+      false,
+    );
+    a.wait.resolve();
+    b.wait.resolve();
+    await Promise.all([first, second]);
+  });
+  it("reattaches a running thread after reload without posting the question", async () => {
+    const wait = deferred<void>();
+    const run = {
+      id: "run",
+      sessionId: "a",
+      documentId: "doc",
+      userMessageId: "q",
+      provider: "api",
+      status: "running" as const,
+      startedAt: "now",
+    };
+    const stream = vi.fn<ChatTransport["stream"]>();
+    const resume = vi
+      .fn<NonNullable<ChatTransport["resume"]>>()
+      .mockImplementation(async (_run, _signal, emit) => {
+        emit({ event: "draft", data: { text: "restored", reset: false } });
+        await wait.promise;
+        emit({ event: "done", data: { ok: true } });
+      });
+    const io: ChatTransport = {
+      messages: vi
+        .fn()
+        .mockResolvedValue([
+          { ...message("q", "user", "old question"), sessionId: "a" },
+        ]),
+      latestRun: vi.fn().mockResolvedValue(run),
+      stream,
+      resume,
+      cancel: vi.fn().mockResolvedValue(undefined),
+    };
+    const session = new ChatSession("doc", io, "a");
+    await session.load();
+    expect(stream).not.toHaveBeenCalled();
+    expect(resume).toHaveBeenCalledOnce();
+    expect(session.getSnapshot().busy).toBe(true);
+    await vi.waitFor(() =>
+      expect(session.getSnapshot().pending?.draft).toBe("restored"),
+    );
+    session.cancel();
+    expect(io.cancel).toHaveBeenCalledOnce();
+    expect(session.getSnapshot().pending?.controller.signal.aborted).toBe(
+      false,
+    );
+    wait.resolve();
+    await vi.waitFor(() => expect(session.getSnapshot().busy).toBe(false));
+  });
+});
+
+it("releases the busy flag when checking an existing run fails before regeneration", async () => {
+  const stream = vi.fn<ChatTransport["stream"]>();
+  const session = new ChatSession("doc", {
+    messages: async () => [message("q", "user", "question")],
+    stream,
+    latestRun: vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("offline")),
+  });
+  await session.load();
+  await expect(session.regenerate("api")).rejects.toThrow("offline");
+  expect(session.getSnapshot().busy).toBe(false);
+  expect(stream).not.toHaveBeenCalled();
+  session.dispose();
+});

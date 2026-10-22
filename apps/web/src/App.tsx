@@ -52,7 +52,6 @@ import {
 import { TrashView } from "./TrashView";
 import { PaperLibrary } from "./papers/PaperLibrary";
 import { PaperSidebar } from "./papers/PaperSidebar";
-import { currentPaperFolder, fileImportedPapers } from "./papers/actions";
 import { usePaperUI } from "./papers/state";
 import { ImportPaperDialog } from "./papers/ImportPaperDialog";
 import { LibraryModeSwitcher, libraryModes } from "./LibraryModeSwitcher";
@@ -106,6 +105,7 @@ export function App() {
   const [commandQuery, setCommandQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [largePapers, setLargePapers] = useState<LargePaper[]>([]);
+  const [largePaperFolder, setLargePaperFolder] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [command, setCommand] = useState(false);
@@ -115,6 +115,7 @@ export function App() {
   useShortcut("search", () => setCommand(true), !active);
   const fileRef = useRef<HTMLInputElement>(null);
   const libraryOverlay = useRef<HTMLDivElement>(null);
+  const fileFolderRef = useRef("");
   const hydrated = useRef(false);
   useEffect(() => {
     Promise.all([
@@ -166,15 +167,28 @@ export function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
-  const chooseFiles = () => {
+  const currentPaperFolder = () => {
+    const view = usePaperUI.getState().view;
+    return currentMode() === "papers" &&
+      (view.startsWith("folder:") || view.startsWith("smart:"))
+      ? view
+      : "";
+  };
+  const chooseFiles = (folder = currentPaperFolder()) => {
     if (window.readerDesktop) {
       setBusy(true);
       void window.readerDesktop
-        .importFiles(currentMode())
-        .then((large) => setLargePapers(large))
+        .importFiles(currentMode(), folder)
+        .then((large) => {
+          setLargePapers(large);
+          setLargePaperFolder(folder);
+        })
         .catch((e) => toast.error(e.message))
         .finally(() => setBusy(false));
-    } else fileRef.current?.click();
+    } else {
+      fileFolderRef.current = folder;
+      fileRef.current?.click();
+    }
   };
   // Long papers are confirmed together: keep them as papers or switch to books.
   const importLargePapers = async (library: LibraryMode) => {
@@ -184,13 +198,20 @@ export function App() {
       if (library === "books") switchMode("books");
       const desktop = papers.flatMap((p) => (p.id ? [p.id] : []));
       if (desktop.length)
-        await window.readerDesktop?.importLargePapers(desktop, library);
-      const importedDocs: Document[] = [];
+        await window.readerDesktop?.importLargePapers(
+          desktop,
+          library,
+          library === "papers" ? largePaperFolder : "",
+        );
       for (const paper of papers)
         if (paper.file)
-          importedDocs.push(await api.import(paper.file, library, true));
+          await api.import(
+            paper.file,
+            library,
+            true,
+            library === "papers" ? largePaperFolder : "",
+          );
       await refreshLibrary();
-      if (library === "papers") await fileImportedPapers(importedDocs);
       toast.success(
         `已导入 ${papers.length} 个文件到${libraryModes[library].label}`,
       );
@@ -198,6 +219,7 @@ export function App() {
       toast.error((e as Error).message);
     } finally {
       setLargePapers([]);
+      setLargePaperFolder("");
       setBusy(false);
     }
   };
@@ -238,7 +260,7 @@ export function App() {
       window.clearInterval(timer);
     };
   }, []);
-  const importFiles = async (files: File[]) => {
+  const importFiles = async (files: File[], folder = currentPaperFolder()) => {
     const target = currentMode();
     const accepted = files.filter((file) =>
       target === "papers"
@@ -252,7 +274,6 @@ export function App() {
           : "仅支持 EPUB 和 PDF，已跳过其他文件",
       );
     if (!accepted.length) return;
-    const folder = target === "papers" ? currentPaperFolder() : "";
     setBusy(true);
     try {
       const elsewhere: Document[] = [];
@@ -260,7 +281,12 @@ export function App() {
       const large: LargePaper[] = [];
       for (const file of accepted) {
         try {
-          const document = await api.import(file, target);
+          const document = await api.import(
+            file,
+            target,
+            false,
+            target === "papers" ? folder : "",
+          );
           if (document.library !== target) elsewhere.push(document);
           else importedDocs.push(document);
         } catch (e) {
@@ -269,21 +295,14 @@ export function App() {
         }
       }
       await refreshLibrary();
-      const filed = folder
-        ? await fileImportedPapers(importedDocs, folder)
-        : "";
       setLargePapers(large);
+      setLargePaperFolder(folder);
       if (elsewhere.length)
         toast.info(
           `${elsewhere.length} 个文件已在${libraryModes[elsewhere[0].library].label}中，可在那里移动`,
         );
       const imported = importedDocs.length;
-      if (imported > 0)
-        toast.success(
-          filed
-            ? `已导入 ${imported} 个文件到「${filed}」`
-            : `已导入 ${imported} 个文件`,
-        );
+      if (imported > 0) toast.success(`已导入 ${imported} 个文件`);
       setError("");
     } catch (e) {
       toast.error((e as Error).message);
@@ -396,7 +415,10 @@ export function App() {
           multiple
           accept={papers ? ".pdf" : ".pdf,.epub"}
           onChange={(e) => {
-            void importFiles(Array.from(e.target.files || []));
+            void importFiles(
+              Array.from(e.target.files || []),
+              fileFolderRef.current,
+            );
             e.target.value = "";
           }}
         />
@@ -558,7 +580,9 @@ export function App() {
                   <Button
                     className="mb-2 h-10 w-full gap-2 rounded-full"
                     onClick={
-                      papers ? () => setImportingPaper(true) : chooseFiles
+                      papers
+                        ? () => setImportingPaper(true)
+                        : () => chooseFiles()
                     }
                     disabled={busy}
                   >
@@ -806,7 +830,7 @@ export function App() {
         <ImportPaperDialog
           open={importingPaper}
           onOpenChange={setImportingPaper}
-          onChooseFiles={chooseFiles}
+          onChooseFiles={(folder) => chooseFiles(folder)}
         />
         <GuideHost
           ready={!loading && !error}

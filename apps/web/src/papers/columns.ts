@@ -21,7 +21,7 @@ export function columnOrder(prefs: PaperLibraryPreferences): TableColumn[] {
 
 export function visibleColumns(prefs: PaperLibraryPreferences): TableColumn[] {
   const shown = new Set<TableColumn>([
-    "title",
+    ...(prefs.showTitle === false ? [] : ["title" as const]),
     ...(prefs.columns || defaultColumns),
   ]);
   return columnOrder(prefs).filter((column) => shown.has(column));

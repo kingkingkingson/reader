@@ -4,6 +4,60 @@
  */
 
 export interface paths {
+    "/api/documents/{id}/annotations/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover translated annotations and split legacy linked marks */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @default false */
+                        force?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description checked=false while processing or data is unavailable; no records deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            checked: boolean;
+                        };
+                    };
+                };
+                /** @description Annotation check or retranslation is already starting */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/translate-selection": {
         parameters: {
             query?: never;
@@ -878,6 +932,10 @@ export interface paths {
                          * @enum {unknown}
                          */
                         allowLarge?: "1";
+                        /** @description Optional target paper category. Applied only to a newly imported paper; an existing document keeps its folders. */
+                        folder?: string;
+                        /** @description Saved smart category ID, mutually exclusive with folder. Its required tags are applied atomically to a newly imported paper. Existing documents keep their tags. */
+                        smartCategory?: string;
                     };
                 };
             };
@@ -1518,6 +1576,55 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/codex-handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Fork the last committed Codex reading turn into an independent conversation with local document and chat snapshots. Does not generate a model answer or change the Reader conversation. Repeated requests for the same snapshot reuse the fork. */
+        post: {
+            parameters: {
+                query?: {
+                    sessionId?: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Prepared independent Codex conversation */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CodexHandoff"];
+                    };
+                };
+                /** @description Document unavailable, no committed Codex conversation, active generation, or handoff failed */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2522,7 +2629,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Queue the EPUB chapter at this location. Top-level TOC boundaries (children of a sole book-title parent) take precedence; without a TOC use the spine file. Queues at most approximately 40000 Unicode source characters, retaining whole paragraphs and completed results. Resumes paused work. No PDF page numbers. */
+        /** @description Queue the entire EPUB chapter at this location through the shared translation workers, retaining completed results. Top-level TOC boundaries (children of a sole book-title parent) take precedence; without a TOC use the spine file. Resumes paused work. No PDF page numbers. */
         post: {
             parameters: {
                 query?: never;
@@ -2557,7 +2664,7 @@ export interface paths {
                         "application/json": {
                             queued: number;
                             characters: number;
-                            /** @description Request this chapter again to queue the remaining text after the character limit. */
+                            /** @description Legacy compatibility field; always false because the entire chapter is queued. */
                             hasMore: boolean;
                         };
                     };
@@ -2588,7 +2695,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Queue untranslated paragraphs and formulas in a page range, in reading order, starting at the first unfinished page and covering at most 30 pages and 40000 source characters. Book pages that were never parsed are parsed first. Also resumes paused processing. */
+        /** @description Queue all untranslated paragraphs and formulas in the requested page range through the shared translation workers, retaining completed results. Missing book pages are parsed first in automatic batches of at most 30 pages. Also resumes paused processing. */
         post: {
             parameters: {
                 query?: never;
@@ -2616,9 +2723,9 @@ export interface paths {
                         "application/json": {
                             queued: number;
                             characters: number;
-                            /** @description Page where the character or 30-page limit stopped the request; 0 when the range is fully queued. */
+                            /** @description Legacy compatibility field; always 0 because the entire range is queued. */
                             nextPage: number;
-                            /** @description Book pages in the window are parsed first (at most 30 pages); translation is queued when parsing finishes. */
+                            /** @description Missing book pages in the requested range are parsed first in automatic batches; translation is queued when parsing finishes. */
                             parsing: boolean;
                         };
                     };
@@ -3476,6 +3583,10 @@ export interface paths {
                         library?: "papers" | "books";
                         /** @default false */
                         allowLarge?: boolean;
+                        /** @description Optional target paper category. Applied only to a newly imported paper; an existing document keeps its folders. */
+                        folder?: string;
+                        /** @description Saved smart category ID, mutually exclusive with folder. Its required tags are applied atomically to a newly imported paper. Existing documents keep their tags. */
+                        smartCategory?: string;
                     };
                 };
             };
@@ -3741,10 +3852,382 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/documents/{id}/chat-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List sessions and latest run; atomically migrate old chat to a default session */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentChatSession"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Create an independent document chat */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title?: string;
+                        /** @enum {unknown} */
+                        provider: "api" | "codex" | "claude" | "kimi";
+                    };
+                };
+            };
+            responses: {
+                /** @description Success */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentChatSession"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/chat-sessions/{session}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename a session or change its backend while idle */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    session: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        title?: string;
+                        /** @enum {unknown} */
+                        provider?: "api" | "codex" | "claude" | "kimi";
+                    };
+                };
+            };
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DocumentChatSession"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/documents/{id}/chat-sessions/{session}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read one session transcript */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    session: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"][];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/chat-sessions/{session}/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a server-owned run; one active run per session, at most four globally */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    session: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {unknown} */
+                        provider: "codex" | "claude" | "kimi" | "api";
+                        attachments?: string[];
+                        /** @description Stable client-generated user message ID. Reuse only for explicit regeneration of the same unanswered last question, with unchanged prompt, context, references, attachments and reading location. The server uses current model settings, does not insert a duplicate question, and returns 409 if the turn has an answer or later messages. Omit for legacy clients. */
+                        userMessageId?: string;
+                        prompt: string;
+                        context: string;
+                        /** @description Reading position captured when sending the question. Navigation context only; does not attach page text or establish evidence. */
+                        readingLocation?: components["schemas"]["DocumentLocation"];
+                        references?: {
+                            text: string;
+                            /** @enum {unknown} */
+                            kind?: "selection" | "section";
+                            location: components["schemas"]["DocumentLocation"];
+                            sourceId?: string;
+                            pageImage?: components["schemas"]["PageImageEvidence"];
+                            corpusRevision?: string;
+                            contentHash?: string;
+                            /** @enum {string} */
+                            precision?: "page" | "block" | "paragraph";
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Success */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChatRun"];
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/chat-sessions/{session}/runs/{run}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Replay and subscribe to a run; disconnecting never cancels it */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    session: string;
+                    run: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Incremental ChatStream SSE; done follows successful persistence */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/event-stream": string;
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/documents/{id}/chat-sessions/{session}/runs/{run}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel this run and wait for it to settle */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    session: string;
+                    run: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ok: boolean;
+                        };
+                    };
+                };
+                /** @description Error */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        CodexHandoff: {
+            /** Format: uuid */
+            threadId: string;
+            /** @description Local codex://threads/<threadId> link */
+            url: string;
+            /** @description Absolute path of the independent document snapshot */
+            directory: string;
+        };
         OverviewContent: {
             summary: string;
             findings: {
@@ -3865,6 +4348,17 @@ export interface components {
         DocumentLocation: {
             /** @constant */
             type: "pdf";
+            sourceAnchors?: {
+                blockId: string;
+                source: string;
+                page: number;
+                bounds: {
+                    x: number;
+                    y: number;
+                    width: number;
+                    height: number;
+                };
+            }[];
             page: number;
             x?: number;
             y?: number;
@@ -4011,6 +4505,8 @@ export interface components {
                 /** @enum {string} */
                 precision?: "page" | "block" | "paragraph";
             }[];
+            /** @description Stable side chat session identity; omitted only by legacy clients. */
+            sessionId?: string;
         };
         Provider: {
             /** @enum {string} */
@@ -4370,12 +4866,22 @@ export interface components {
         TranslationLocation: {
             blockId: string;
             sourceHash: string;
+            sourceText?: string;
+            targetText?: string;
+            recovered?: boolean;
+            wholeSentence?: boolean;
+            matchedQuote?: string;
             sentenceIndexes: number[];
             start: number;
             end: number;
             ranges?: {
                 blockId: string;
                 sourceHash: string;
+                sourceText?: string;
+                targetText?: string;
+                recovered?: boolean;
+                wholeSentence?: boolean;
+                matchedQuote?: string;
                 sentenceIndexes: number[];
                 start: number;
                 end: number;
@@ -4421,6 +4927,27 @@ export interface components {
             level?: number;
             location: components["schemas"]["EPUBLocation"];
             image?: string;
+        };
+        ChatRun: {
+            id: string;
+            sessionId: string;
+            documentId: string;
+            userMessageId: string;
+            provider: string;
+            /** @enum {unknown} */
+            status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+            error?: string;
+            startedAt: string;
+            finishedAt?: string;
+        };
+        DocumentChatSession: {
+            id: string;
+            documentId: string;
+            title: string;
+            provider: string;
+            createdAt: string;
+            updatedAt: string;
+            latestRun?: components["schemas"]["ChatRun"];
         };
     };
     responses: never;

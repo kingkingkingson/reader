@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { DiagnosticExport } from "./DiagnosticExport";
+import { LibraryLocationSettings } from "./LibraryLocationSettings";
 import { CommandLineSettings } from "./CommandLineSettings";
 import { ProviderIdentity } from "./ProviderIdentity";
 import { TaskModels } from "./TaskModels";
@@ -912,6 +913,11 @@ export function Settings({
             </section>
           </TabsContent>
           <TabsContent value="papers" className="settings-panel" keepMounted>
+            {window.readerDesktop?.libraryLocation && (
+              <div className="mb-6">
+                <LibraryLocationSettings open={open} />
+              </div>
+            )}
             <section>
               <h3 className="mb-3 text-sm font-medium">导入设置</h3>
               <label className="flex items-start gap-2 text-sm">

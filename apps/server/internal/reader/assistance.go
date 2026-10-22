@@ -51,6 +51,33 @@ func (s *Server) setAssistance(w http.ResponseWriter, r *http.Request) {
 			p = initialDocumentProcessing(d, "")
 		}
 	}
+	// Initial paper parsing is mandatory. Translation controls must neither
+	// cancel its worker nor discard the import-time translation preference.
+	if d.Type == "pdf" && d.Library == "papers" && p.Phase == "learning" && !p.Retranslating {
+		defer s.processingMu.Unlock()
+		if req.Action == "pause" {
+			fail(w, 409, "论文解析不能暂停；解析完成后可暂停翻译")
+			return
+		}
+		if !p.Enabled || (p.Status != "queued" && p.Status != "running") {
+			if !p.Enabled {
+				limit := 0
+				p.AutoTranslateMaxPages = &limit
+			}
+			p.Enabled, p.Status, p.Detail = true, "queued", "等待解析 PDF"
+			p.CompletedAt = ""
+			if e = s.Store.saveProcessing(p); e != nil {
+				fail(w, 500, "无法恢复解析任务")
+				return
+			}
+			if p, e = s.Store.processing(d.ID); e != nil {
+				fail(w, 500, "无法读取处理状态")
+				return
+			}
+		}
+		respond(w, 200, p)
+		return
+	}
 	if s.blockedProcessing == nil {
 		s.blockedProcessing = map[string]bool{}
 	}

@@ -86,7 +86,6 @@ interface Block extends Region {
 }
 const blocks: Block[] = [];
 const warnings: string[] = [];
-const incompletePages: number[] = [];
 const sections: string[] = [];
 const timings: {
   page: number;
@@ -113,9 +112,6 @@ try {
     const regions = await detectRegions(session, canvas);
     stage("page_text", number);
     const spans = await extractTextSpans(page, scale);
-    if (!spans.length) incompletePages.push(number);
-    if (!spans.length)
-      warnings.push(`第 ${number} 页无可提取文字；尚未接入 OCR，正文不完整。`);
     const composed = readingRegions(regions, spans);
     const assigned = assignText(composed, spans);
     const pageBlocks: Block[] = composed.map((region, i) => ({
@@ -229,7 +225,7 @@ try {
     metadata: metadata.info,
     blocks,
     warnings,
-    incompletePages,
+    incompletePages: [],
     timings,
     elapsedMilliseconds: Math.round(performance.now() - start),
     peakRSSBytes: process.resourceUsage().maxRSS * 1024,

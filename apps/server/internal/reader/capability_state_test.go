@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestRuntimeFailurePersistsCapability(t *testing.T) {
-	for _, mode := range []string{"text", "vision", "canceled", "consumer", "new-model", "new-check", "fallback"} {
+func TestRuntimeFailurePreservesVerifiedCapability(t *testing.T) {
+	for _, mode := range []string{"text", "vision", "canceled", "consumer", "new-model", "new-check", "fallback", "timeout", "network", "authentication", "model"} {
 		t.Run(mode, func(t *testing.T) {
 			store, err := OpenStore(t.TempDir())
 			if err != nil {
@@ -44,6 +44,16 @@ func TestRuntimeFailurePersistsCapability(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				switch mode {
+				case "timeout":
+					return GenerateResult{}, context.DeadlineExceeded
+				case "network":
+					return GenerateResult{}, generationError(ErrorNetwork, "connection reset")
+				case "authentication":
+					return GenerateResult{}, generationError(ErrorAuthentication, "expired login")
+				case "model":
+					return GenerateResult{}, generationError(ErrorModel, "model unavailable")
+				}
 				return GenerateResult{}, errors.New("provider unavailable")
 			})
 			g.connections["codex"] = connection
@@ -54,7 +64,7 @@ func TestRuntimeFailurePersistsCapability(t *testing.T) {
 				})}
 			}
 			input := AIInput{Prompt: "test"}
-			if mode == "vision" {
+			if mode == "vision" || mode == "timeout" {
 				input.Image = []byte{1}
 			}
 			_, err = g.Generate(ctx, input, true, func(ProviderEvent) error {
@@ -67,16 +77,21 @@ func TestRuntimeFailurePersistsCapability(t *testing.T) {
 				t.Fatal(err)
 			}
 			saved := NewServer(store, "test", "").aiConfig().Capabilities["codex"]
-			shouldFail := mode == "text" || mode == "vision" || mode == "fallback"
-			if shouldFail {
-				if saved.Vision || saved.Error != "provider unavailable" || saved.CheckedAt == "initial" {
-					t.Fatalf("failure not persisted: %+v", saved)
+
+			if !saved.Text || !saved.Vision || saved.Error != "" {
+				t.Fatalf("runtime failure revoked verified capability: %+v", saved)
+			}
+			if mode == "vision" || mode == "timeout" {
+				next := s.generationService(s.aiConfig())
+				connection := next.connections["codex"]
+				connection.Adapter = adapterFunc(func(_ context.Context, _ GenerateRequest, emit func(ProviderEvent) error) (GenerateResult, error) {
+					_ = emit(ProviderEvent{Text: "$$x=1$$"})
+					return GenerateResult{Text: "$$x=1$$", FinishReason: "stop"}, nil
+				})
+				next.connections["codex"] = connection
+				if _, err := next.Generate(t.Context(), input, false, nil); err != nil {
+					t.Fatalf("next formula blocked after a runtime error: %v", err)
 				}
-				if saved.Text != (mode == "vision") {
-					t.Fatalf("wrong text capability: %+v", saved)
-				}
-			} else if !saved.Text || !saved.Vision || saved.Error != "" {
-				t.Fatalf("unrelated cancellation or stale request changed capability: %+v", saved)
 			}
 		})
 	}

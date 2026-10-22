@@ -22,7 +22,7 @@ vi.mock("@reader/api", () => ({
 let root: Root, host: HTMLDivElement;
 const paused: Processing = {
   documentId: "book",
-  phase: "learning",
+  phase: "translating",
   status: "paused",
   enabled: false,
   pagesDone: 0,
@@ -177,8 +177,8 @@ it("a book translates the current chapter instead of the whole document", async 
   };
   vi.mocked(api.translateRange).mockResolvedValue({
     queued: 12,
-    characters: 39000,
-    nextPage: 31,
+    characters: 50000,
+    nextPage: 0,
     parsing: false,
   });
   vi.mocked(api.assistance)
@@ -205,7 +205,7 @@ it("a book translates the current chapter instead of the whole document", async 
   );
   expect(api.translateRange).toHaveBeenCalledWith("book", 20, 45);
   expect(api.setAssistance).not.toHaveBeenCalled();
-  expect(toast).toHaveBeenCalledWith(expect.stringContaining("第 31 页"));
+  expect(toast).not.toHaveBeenCalled();
   expect(host.textContent).toContain("暂停翻译");
 });
 
@@ -269,4 +269,33 @@ it("offers manual translation after local parsing instead of resuming a translat
     host.querySelector<HTMLButtonElement>("button")!.click(),
   );
   expect(api.setAssistance).toHaveBeenCalledWith("book", "start");
+});
+
+it.each(["queued", "running"] as const)(
+  "keeps mandatory paper parsing %s without a pause action",
+  async (status) => {
+    await render(1, { ...paused, phase: "learning", enabled: true, status });
+    expect(host.textContent).toContain(
+      status === "queued" ? "等待解析" : "解析中",
+    );
+    const button = host.querySelector<HTMLButtonElement>("button")!;
+    expect(button.disabled).toBe(true);
+    await act(async () => button.click());
+    expect(api.setAssistance).not.toHaveBeenCalled();
+  },
+);
+
+it("retries paper parsing without labelling it as translation", async () => {
+  await render(1, {
+    ...paused,
+    enabled: true,
+    phase: "learning",
+    status: "failed",
+    autoTranslateMaxPages: 0,
+  });
+  expect(host.textContent).toContain("重试解析");
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>("button")!.click(),
+  );
+  expect(api.setAssistance).toHaveBeenCalledWith("book", "resume");
 });

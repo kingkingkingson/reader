@@ -6,7 +6,13 @@ import (
 )
 
 var documentCitationPattern = regexp.MustCompile(`[^]*(?:|)`)
-var documentNativeCitationPattern = regexp.MustCompile(`\[S[1-9][0-9]*\]`)
+
+// Accept paired bracket forms actually returned by multilingual providers.
+// Each extracted ID still has to resolve to read evidence before saving.
+const documentSourceList = `S[1-9][0-9]*(?:[ \t]*[,，、;；][ \t]*S[1-9][0-9]*)*`
+
+var documentNativeCitationPattern = regexp.MustCompile(`\[` + documentSourceList + `\]|【` + documentSourceList + `】|［` + documentSourceList + `］|（` + documentSourceList + `）|\(` + documentSourceList + `\)`)
+var documentCitationIDPattern = regexp.MustCompile(`S[1-9][0-9]*`)
 var documentSourceIDPattern = regexp.MustCompile(`^S[1-9][0-9]*$`)
 
 // Provider markers and Reader labels resolve through the same evidence check.
@@ -16,7 +22,7 @@ func documentCitationSources(text string) ([]string, error) {
 	// Scan native labels independently: an unrelated provider marker must not
 	// hide a source label that the original validator would have checked.
 	for _, marker := range documentNativeCitationPattern.FindAllString(text, -1) {
-		sources = append(sources, marker[1:len(marker)-1])
+		sources = append(sources, documentCitationIDPattern.FindAllString(marker, -1)...)
 	}
 	for _, marker := range documentCitationPattern.FindAllString(text, -1) {
 		parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(marker, ""), ""), "")

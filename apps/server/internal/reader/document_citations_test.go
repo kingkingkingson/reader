@@ -10,7 +10,7 @@ import (
 
 func TestDocumentProviderCitationsRequireReadEvidence(t *testing.T) {
 	a := &documentAgent{Evidence: []documentEvidence{{SourceID: "S64", Text: "original"}, {SourceID: "S65", Text: "second"}}}
-	for _, text := range []string{"answer [S64]", "answer citeS64", "answer fileciteS64", "answer citeS64S65 [S64]"} {
+	for _, text := range []string{"answer [S64]", "answer 【S64】", "answer ［S64］", "answer （S64、S65）", "answer (S64, S65)", "answer [S64; S65]", "answer citeS64", "answer fileciteS64", "answer citeS64S65 [S64]"} {
 		refs, err := a.references(text)
 		if err != nil || !strings.Contains(string(refs), `"sourceId":"S64"`) {
 			t.Fatalf("citation not resolved: %s %s %v", text, refs, err)
@@ -19,7 +19,7 @@ func TestDocumentProviderCitationsRequireReadEvidence(t *testing.T) {
 			t.Fatal("duplicate reference", string(refs))
 		}
 	}
-	for _, text := range []string{"[S999]", "citeS999", "citeS64S999", "citeturn1search0", "cite", "citeS64", "citeS64", "cite", "filecite", "cite", "ci", "citeS999citeS64"} {
+	for _, text := range []string{"[S999]", "【S999】", "［S999］", "（S64、S999）", "(S64, S999)", "citeS999", "citeS64S999", "citeturn1search0", "cite", "citeS64", "citeS64", "cite", "filecite", "cite", "ci", "citeS999citeS64"} {
 		if _, err := a.references(text); errorKind(err) != ErrorProtocol {
 			t.Fatalf("unverified citation accepted: %q %v", text, err)
 		}
@@ -55,5 +55,14 @@ func TestProviderCitationPersistsAndValidatesOriginalLocation(t *testing.T) {
 	}
 	if out := request(t, s, "GET", path, nil); out.Code != 409 {
 		t.Fatal("stale citation still navigable", out.Code, out.Body.String())
+	}
+}
+
+func TestNativeCitationBracketsRemainPaired(t *testing.T) {
+	for _, text := range []string{"【S64]", "［S64】", "（S64]", "(S64）", "S64", "(S64 is a variable)"} {
+		sources, err := documentCitationSources(text)
+		if err != nil || len(sources) != 0 {
+			t.Fatalf("unexpected source for %q: %v %v", text, sources, err)
+		}
 	}
 }

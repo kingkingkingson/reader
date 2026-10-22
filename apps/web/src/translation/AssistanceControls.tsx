@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Pause, RotateCcw, Languages } from "lucide-react";
+import { Check, FileSearch, Pause, RotateCcw, Languages } from "lucide-react";
 import type { EPUBLocation, LibraryMode, Processing } from "@reader/core";
 import { api } from "@reader/api";
 import {
@@ -63,6 +63,13 @@ export function AssistanceControls({
     };
   }, [documentId]);
   const complete = job?.status === "complete";
+  const paperParsing =
+    library === "papers" &&
+    !epubChapter &&
+    job?.phase === "learning" &&
+    !job.retranslating &&
+    !complete;
+  const parsingPending = paperParsing && job.status !== "failed";
   const [action, label]: [Action, string] =
     job?.enabled && job.status === "failed"
       ? ["resume", "重试翻译"]
@@ -79,18 +86,23 @@ export function AssistanceControls({
             ? ["chapter", "翻译本章"]
             : ["start", "翻译完成"];
   const finished = complete && action !== "chapter";
-  const actionLabel = job?.retranslating
-    ? action === "pause"
-      ? "暂停重译"
-      : "继续重译"
-    : label;
+  const actionLabel = paperParsing
+    ? job.status === "failed"
+      ? "重试解析"
+      : job.status === "running"
+        ? "解析中"
+        : "等待解析"
+    : job?.retranslating
+      ? action === "pause"
+        ? "暂停重译"
+        : "继续重译"
+      : label;
   const run = async () => {
     if (action !== "chapter") return api.setAssistance(documentId, action);
     if (epubChapter) {
       const location = epubChapter();
       if (!location?.href) throw new Error("正文仍在加载，请稍后再试");
-      const result = await api.translateEPUBChapter(documentId, location);
-      if (result.hasMore) toast("本章较长，完成后可再次点击翻译本章继续");
+      await api.translateEPUBChapter(documentId, location);
       return api.assistance(documentId);
     }
     const range = chapter?.();
@@ -101,11 +113,6 @@ export function AssistanceControls({
       range.toPage,
     );
     if (result.parsing) toast("正在解析本章，完成后开始翻译");
-    else if (!result.queued) toast("本章已翻译");
-    else if (result.nextPage)
-      toast(
-        `本章较长，本次翻译至第 ${result.nextPage} 页，完成后可再次翻译本章`,
-      );
     return api.assistance(documentId);
   };
   return (
@@ -113,10 +120,10 @@ export function AssistanceControls({
       <Button
         variant="ghost"
         size="sm"
-        disabled={busy || !job || finished}
+        disabled={busy || !job || finished || parsingPending}
         title={
           action === "chapter"
-            ? "翻译当前章节，单次最多约 4 万字"
+            ? "翻译当前完整章节，复用已完成译文"
             : job?.enabled
               ? job.detail
               : epubChapter
@@ -136,7 +143,9 @@ export function AssistanceControls({
           }
         }}
       >
-        {finished ? (
+        {parsingPending ? (
+          <FileSearch />
+        ) : finished ? (
           <Check />
         ) : action === "pause" ? (
           <Pause />

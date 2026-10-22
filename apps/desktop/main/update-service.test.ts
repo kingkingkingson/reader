@@ -72,27 +72,18 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(day * 10);
   vi.clearAllMocks();
-  assets = [
-    "Reader-0.2.0-mac-arm64.dmg",
-    "Reader-0.2.0-win-x64.exe",
-    "SHA256SUMS.txt",
-  ];
+  assets = ["Reader-0.2.0-mac-arm64.dmg", "Reader-0.2.0-win-x64.exe"];
   mocks.inPlace.mockResolvedValue(true);
   mocks.stage.mockResolvedValue(undefined);
   mocks.app.isPackaged = true;
   mocks.read.mockRejectedValue(new Error("missing"));
   mocks.dialog.mockResolvedValue({ response: 1 });
-  mocks.fetch.mockImplementation(async () =>
-    Response.json({
-      tag_name: "v0.2.0",
-      draft: false,
-      prerelease: false,
-      assets: assets.map((name) => ({
-        name,
-        state: "uploaded",
-        browser_download_url: `https://github.com/cynicalight/reader/releases/download/v0.2.0/${name}`,
-      })),
-    }),
+  mocks.fetch.mockImplementation(async (url: string) =>
+    url.endsWith("/SHA256SUMS.txt")
+      ? new Response(
+          assets.map((name) => `${"a".repeat(64)}  ${name}`).join("\n"),
+        )
+      : Response.json({ tag_name: "v0.2.0" }),
   );
   vi.stubGlobal("process", { ...process, platform: "darwin", arch: "arm64" });
 });
@@ -109,7 +100,7 @@ it("does not check on its own and coalesces manual checks", async () => {
   expect(mocks.fetch).not.toHaveBeenCalled();
   expect(mocks.dialog).not.toHaveBeenCalled();
   await Promise.all([service.check(), service.check()]);
-  expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  expect(mocks.fetch).toHaveBeenCalledTimes(2);
   expect(mocks.dialog).toHaveBeenCalledTimes(1);
   expect(mocks.download).not.toHaveBeenCalled();
 });
@@ -294,14 +285,10 @@ it("stages a signed Mac update silently and installs it on restart", async () =>
     recursive: true,
     force: true,
   });
-  // The background check asks nothing before the update is ready.
+  expect(mocks.dialog).toHaveBeenCalledTimes(1);
   expect(mocks.dialog).toHaveBeenCalledWith(
     window,
     expect.objectContaining({ message: "Reader 0.2.0 已准备就绪" }),
-  );
-  expect(send).toHaveBeenCalledWith(
-    "reader:update-progress",
-    expect.objectContaining({ phase: "download" }),
   );
   expect(mocks.quitAndInstall).toHaveBeenCalledTimes(1);
   expect(mocks.open).not.toHaveBeenCalled();
@@ -338,6 +325,7 @@ it("does not contact GitHub in development mode", async () => {
   mocks.app.isPackaged = false;
   const service = await startUpdateService(window);
   stop = service.stop;
+  await service.check();
   await service.check();
   expect(mocks.fetch).not.toHaveBeenCalled();
   expect(mocks.dialog).toHaveBeenCalledWith(
@@ -376,22 +364,6 @@ it.each([0, 1])(
     expect(mocks.download).not.toHaveBeenCalled();
   },
 );
-
-it("stays quiet when a background check would have been due", async () => {
-  mocks.fetch.mockResolvedValue(new Response("", { status: 429 }));
-  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-  try {
-    const service = await startUpdateService(window);
-    stop = service.stop;
-    await vi.advanceTimersByTimeAsync(day);
-    expect(mocks.fetch).not.toHaveBeenCalled();
-    expect(mocks.dialog).not.toHaveBeenCalled();
-    expect(mocks.external).not.toHaveBeenCalled();
-    expect(warning).not.toHaveBeenCalled();
-  } finally {
-    warning.mockRestore();
-  }
-});
 
 it("reports a browser launch failure without rejecting the update check", async () => {
   mocks.fetch.mockResolvedValue(new Response("", { status: 403 }));

@@ -94,6 +94,7 @@ func fakeLayout(t *testing.T) (log string) {
 	script := filepath.Join(dir, "layout.sh")
 	body := `while [ $# -gt 0 ]; do case "$1" in --output) out="$2"; shift;; --from-page) from="$2"; shift;; --to-page) to="$2"; shift;; esac; shift; done
 echo "$from-$to" >> "$FAKE_LAYOUT_LOG"
+[ "$from" = "$FAKE_LAYOUT_FAIL_FROM" ] && exit 1
 mkdir -p "$out/assets"
 text=""; i=0; while [ $i -lt 60 ]; do text="${text}Sentence number. "; i=$((i+1)); done
 blocks=""; pages=""; p=$from
@@ -124,9 +125,10 @@ func TestBookChapterParsesOnlyItsPagesThenTranslates(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &d) != nil {
 		t.Fatal(w.Body.String())
 	}
+	from, to := 1, 65
 	chapter := func() translationRange {
 		t.Helper()
-		w := request(t, s, "POST", "/api/documents/"+d.ID+"/translations/range", strings.NewReader(`{"fromPage":1,"toPage":80}`))
+		w := request(t, s, "POST", "/api/documents/"+d.ID+"/translations/range", strings.NewReader(fmt.Sprintf(`{"fromPage":%d,"toPage":%d}`, from, to)))
 		var result translationRange
 		if w.Code != 202 || json.Unmarshal(w.Body.Bytes(), &result) != nil {
 			t.Fatalf("chapter request: %d %s", w.Code, w.Body.String())
@@ -148,11 +150,11 @@ func TestBookChapterParsesOnlyItsPagesThenTranslates(t *testing.T) {
 	}
 	learn()
 	m, err := s.readLayout(d.ID)
-	if err != nil || len(m.ParsedPages) != bookLayoutPages || len(m.Blocks) != bookLayoutPages {
+	if err != nil || len(m.ParsedPages) != 65 || len(m.Blocks) != 65 {
 		t.Fatalf("first window: %+v %v", m.ParsedPages, err)
 	}
 	p, _ := s.Store.processing(d.ID)
-	if p.Chapter != nil || p.Phase != "translating" || p.Status != "queued" || p.TranslationsTotal != bookLayoutPages {
+	if p.Chapter != nil || p.Phase != "translating" || p.Status != "queued" || p.TranslationsTotal != 65 {
 		t.Fatalf("parsed chapter was not queued for translation: %+v", p)
 	}
 	items, _ := s.translations(d.ID, m)
@@ -162,12 +164,13 @@ func TestBookChapterParsesOnlyItsPagesThenTranslates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	from, to = 61, 80
 	if result := chapter(); !result.Parsing {
 		t.Fatalf("continuing the chapter did not parse the next pages: %+v", result)
 	}
 	learn()
 	m, _ = s.readLayout(d.ID)
-	if len(m.ParsedPages) != 2*bookLayoutPages || len(m.Blocks) != 2*bookLayoutPages || m.Blocks[bookLayoutPages].ID != "p31-b1" {
+	if len(m.ParsedPages) != 80 || len(m.Blocks) != 80 || m.Blocks[65].ID != "p66-b1" {
 		t.Fatalf("second window not merged: %v", m.ParsedPages)
 	}
 	raw, _ := os.ReadFile(filepath.Join(s.analysisDir(d.ID), "manifest.json"))
@@ -175,11 +178,11 @@ func TestBookChapterParsesOnlyItsPagesThenTranslates(t *testing.T) {
 		t.Fatal("merging dropped manifest fields")
 	}
 	calls, _ := os.ReadFile(log)
-	if string(calls) != "1-30\n31-60\n" {
+	if string(calls) != "1-30\n31-60\n61-65\n66-80\n" {
 		t.Fatalf("layout ran for %q", calls)
 	}
 	statuses := translationStatuses(t, s, d.ID, m)
-	if statuses["p30-b1"] != "complete" || statuses["p31-b1"] != "pending" || statuses["p60-b1"] != "pending" {
+	if statuses["p65-b1"] != "complete" || statuses["p66-b1"] != "pending" || statuses["p80-b1"] != "pending" {
 		t.Fatalf("second window statuses: %v", statuses)
 	}
 }
@@ -190,11 +193,11 @@ func TestChapterWindowStartsAtUnfinishedPages(t *testing.T) {
 		m.Blocks = append(m.Blocks, PDFBlock{ID: fmt.Sprintf("p%d-b1", page), Page: page})
 	}
 	items := []TranslationBlock{{BlockID: "p1-b1", Status: "complete"}, {BlockID: "p2-b1", Status: "idle"}, {BlockID: "p3-b1", Status: "complete"}}
-	if start, end, ok := chapterWindow(&m, items, 1, 100); !ok || start != 2 || end != 31 {
+	if start, end, ok := chapterWindow(&m, items, 1, 100); !ok || start != 2 || end != 100 {
 		t.Fatalf("window %d-%d %v", start, end, ok)
 	}
 	items[1].Status = "complete"
-	if start, end, ok := chapterWindow(&m, items, 1, 100); !ok || start != 4 || end != 33 {
+	if start, end, ok := chapterWindow(&m, items, 1, 100); !ok || start != 4 || end != 100 {
 		t.Fatalf("window %d-%d %v", start, end, ok)
 	}
 	if _, _, ok := chapterWindow(&m, items, 1, 3); ok {
@@ -205,7 +208,40 @@ func TestChapterWindowStartsAtUnfinishedPages(t *testing.T) {
 	}
 }
 
-func TestBookTranslatesOnlyRequestedChapterWithinLimit(t *testing.T) {
+func TestBookChapterRetryReusesParsedBatches(t *testing.T) {
+	s := testServer(t)
+	s.Token = "test-secret"
+	log := fakeLayout(t)
+	t.Setenv("FAKE_LAYOUT_FAIL_FROM", "31")
+	w := uploadTo(t, s, "books", "book.pdf", testPDF(80))
+	var d Document
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &d) != nil {
+		t.Fatal(w.Body.String())
+	}
+	p, _ := s.Store.processing(d.ID)
+	p.Chapter = &PageRange{1, 65}
+	if err := s.learnPDF(t.Context(), &p); err == nil {
+		t.Fatal("failed parser batch reported success")
+	}
+	m, err := s.readLayout(d.ID)
+	if err != nil || len(m.ParsedPages) != 30 || p.Chapter == nil {
+		t.Fatalf("lost completed parsing or chapter request: %+v %v", m, err)
+	}
+	t.Setenv("FAKE_LAYOUT_FAIL_FROM", "")
+	if err := s.learnPDF(t.Context(), &p); err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := os.ReadFile(log)
+	if string(calls) != "1-30\n31-60\n31-60\n61-65\n" {
+		t.Fatalf("retry reparsed completed pages: %s", calls)
+	}
+	m, _ = s.readLayout(d.ID)
+	if len(m.ParsedPages) != 65 || p.TranslationsTotal != 65 || p.Chapter != nil {
+		t.Fatalf("retry did not queue whole chapter: %+v", p)
+	}
+}
+
+func TestBookTranslatesWholeRequestedChapterWithPaperWorkers(t *testing.T) {
 	s, p, m := bookFixture(t)
 	var mu sync.Mutex
 	translated := []string{}
@@ -245,8 +281,8 @@ func TestBookTranslatesOnlyRequestedChapterWithinLimit(t *testing.T) {
 	}
 
 	code, result := requestRange(t, s, 2, 6)
-	if code != 202 || result.Queued != 4 || result.Characters != 4*8999 || result.NextPage != 6 {
-		t.Fatalf("chapter limit not applied: %d %+v", code, result)
+	if code != 202 || result.Queued != 5 || result.Characters != 5*8999 || result.NextPage != 0 {
+		t.Fatalf("whole chapter not queued: %d %+v", code, result)
 	}
 	p, _ = s.Store.processing("doc")
 	if p.Status != "queued" || p.Phase != "translating" {
@@ -256,22 +292,22 @@ func TestBookTranslatesOnlyRequestedChapterWithinLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	sort.Strings(translated)
-	if strings.Join(translated, ",") != "p2-b1,p3-b1,p4-b1,p5-b1" {
+	if strings.Join(translated, ",") != "p2-b1,p3-b1,p4-b1,p5-b1,p6-b1" {
 		t.Fatalf("translated %v", translated)
 	}
 	statuses := translationStatuses(t, s, "doc", m)
-	for id, want := range map[string]string{"p1-b1": "idle", "p2-b1": "complete", "p5-b1": "complete", "p6-b1": "idle", "p9-b2": "idle"} {
+	for id, want := range map[string]string{"p1-b1": "idle", "p2-b1": "complete", "p5-b1": "complete", "p6-b1": "complete", "p7-b1": "idle", "p9-b2": "idle"} {
 		if statuses[id] != want {
 			t.Fatalf("%s is %s, want %s", id, statuses[id], want)
 		}
 	}
 	p, _ = s.Store.processing("doc")
-	if p.Status != "complete" || p.TranslationsDone != 4 || p.TranslationsTotal != 4 {
+	if p.Status != "complete" || p.TranslationsDone != 5 || p.TranslationsTotal != 5 {
 		t.Fatalf("progress counted unrequested paragraphs: %+v", p)
 	}
 
 	code, result = requestRange(t, s, 2, 6)
-	if code != 202 || result.Queued != 1 || result.NextPage != 0 {
+	if code != 202 || result.Queued != 0 || result.NextPage != 0 {
 		t.Fatalf("continuing the chapter: %d %+v", code, result)
 	}
 }
@@ -290,5 +326,15 @@ func TestBookRangeRequestResumesPausedProcessing(t *testing.T) {
 	p, _ = s.Store.processing("doc")
 	if !p.Enabled || p.Status != "queued" {
 		t.Fatalf("explicit chapter request stayed paused: %+v", p)
+	}
+	if got := assistanceRequest(t, s, "pause"); got.Enabled {
+		t.Fatal("pause did not disable queued work")
+	}
+	if code, result := requestRange(t, s, 1, 1); code != 202 || result.Queued != 0 {
+		t.Fatalf("pending chapter was duplicated: %d %+v", code, result)
+	}
+	p, _ = s.Store.processing("doc")
+	if !p.Enabled || p.Status != "queued" {
+		t.Fatalf("pending chapter did not resume: %+v", p)
 	}
 }

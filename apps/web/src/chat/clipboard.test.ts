@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { copyText } from "./clipboard";
+import { copyImage, copyText } from "./clipboard";
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -40,6 +40,38 @@ it("confirms successful copies and writes again when the same passage is clicked
   await copyText("原文", "已复制");
   expect(writeText).toHaveBeenCalledTimes(2);
   expect(toast.success).toHaveBeenLastCalledWith("已复制", {
+    id: "reader-clipboard",
+  });
+});
+it("copies figures through the desktop bridge", async () => {
+  const write = vi.fn();
+  const writeClipboardImage = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { write } });
+  vi.stubGlobal("window", { readerDesktop: { writeClipboardImage } });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(new Uint8Array([137, 80]))),
+  );
+  await copyImage("/pub/t/doc/assets/fig.png", "图 1");
+  expect(writeClipboardImage).toHaveBeenCalledWith(
+    new Uint8Array([137, 80]),
+    "图 1",
+  );
+  expect(write).not.toHaveBeenCalled();
+  expect(toast.success).toHaveBeenCalledWith("已复制图片", {
+    id: "reader-clipboard",
+  });
+});
+it("reports a failed figure fetch in the desktop app", async () => {
+  const writeClipboardImage = vi.fn();
+  vi.stubGlobal("window", { readerDesktop: { writeClipboardImage } });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(new Response(null, { status: 404 })),
+  );
+  await copyImage("/pub/t/doc/assets/fig.png", "");
+  expect(writeClipboardImage).not.toHaveBeenCalled();
+  expect(toast.error).toHaveBeenCalledWith("复制图片失败", {
     id: "reader-clipboard",
   });
 });

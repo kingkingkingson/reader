@@ -485,7 +485,7 @@ func (s *Server) pdfCorpus(ctx context.Context, d Document, c *documentCorpus) e
 	}
 	if len(c.Coverage.Missing) > 0 {
 		c.Coverage.Status = "partial"
-		c.Coverage.Warnings = append(c.Coverage.Warnings, "缺失页可能为扫描或无文字页；当前未接入 OCR")
+		c.Coverage.Warnings = append(c.Coverage.Warnings, "部分页面没有可检索文字，可查看对应页面原图")
 	}
 	if complexText {
 		c.Coverage.Warnings = append(c.Coverage.Warnings, "表格、图表和公式只索引已有原文文字；二维结构需对照原文")

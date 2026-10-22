@@ -32,6 +32,10 @@ type chatEntry struct {
 
 // Private request metadata: never accepted from HTTP clients or documents.
 type chatInput struct {
+	piConversation  *documentConversation
+	piProvider      string
+	SessionID       string
+	server          *Server
 	ReadingLocation json.RawMessage
 	History         []Message
 	Summary         string
@@ -63,8 +67,14 @@ func truncateChatText(text string, limit int) string {
 	}
 	return text[:n] + marker
 }
-func (s *Store) chatHistory(documentID string) ([]Message, error) {
-	rows, err := s.DB.Query("SELECT body FROM messages WHERE document_id=? ORDER BY rowid DESC", documentID)
+func (s *Store) chatHistory(documentID string, session ...string) ([]Message, error) {
+	query := "SELECT body FROM messages WHERE document_id=?"
+	args := []any{documentID}
+	if len(session) > 0 {
+		query += " AND COALESCE(json_extract(body,'$.sessionId'),'')=?"
+		args = append(args, session[0])
+	}
+	rows, err := s.DB.Query(query+" ORDER BY rowid DESC", args...)
 	if err != nil {
 		return nil, err
 	}

@@ -83,6 +83,7 @@ beforeEach(() => {
     restart,
     checkForUpdates: vi.fn(),
     writeClipboardText: vi.fn(),
+    writeClipboardImage: vi.fn(),
     setAppearance: vi.fn(),
     importFiles: vi.fn(),
     importLargePapers: vi.fn(),

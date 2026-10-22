@@ -38,6 +38,7 @@ Reader 以 EPUB 和 PDF 为两种核心文档格式，将图书库与论文库�
 **AI 助读**
 
 - **问答与解释**：选区翻译与解释、多选区引用、EPUB 当前章节或 PDF 当前页总结、对话历史和生成取消。普通提问默认附带论文标题和摘要，可开启章节正文；引用选段提问时附带所在章节。回答中的出处可跳回原文并闪烁定位。
+- **在 Codex 中继续**：完成 Codex 文档阅读对话后，从 Agent 顶栏打开独立的 Codex App 对话，保留已有上下文并附带原文和聊天快照。关闭 Reader 后也可继续阅读；两边后续消息不自动同步。
 - **两种接入方式**：检测本机 Claude Code / Codex CLI / Kimi Code CLI 的安装与登录状态，通过官方 CLI 使用已有账户；或在设置中配置 API 连接，支持 OpenAI Chat Completions 与 Anthropic Messages 协议。问答与翻译可分别选择模型和思考强度。
 
 **桌面应用**
@@ -123,6 +124,10 @@ CLI 在临时空目录中运行。Claude 配置为禁用工具与 MCP；Codex �
 | 已安装桌面版                   | Electron `userData/library/`；macOS 通常为 `~/Library/Application Support/Reader/library/` |
 | 未打包桌面版（`pnpm desktop`） | macOS 为 `~/Library/Application Support/Reader Dev/library/`                               |
 | 浏览器开发模式（`pnpm dev`）   | 项目根目录的 `.reader/`                                                                    |
+
+桌面版可在 **设置 → 论文库 → 书库位置** 中选择新的保存文件夹。Reader 会在其中新建 `Reader Library`，保存当前阅读状态后，复制 PDF、EPUB、笔记、批注、阅读记录及其他书库数据，校验成功后重启。已有的 `Reader Library` 不会被覆盖，原书库保留为迁移时的备份，之后的修改只写入新位置。笔记仍保存在书库数据库中，不单独导出文件；这不是 Zotero 持续同步。
+
+书库保存路径（包括上级目录）不能包含 `?`。自定义位置记录在 `userData/library-location.json`，命令行也会跟随该位置。若外接存储设备未连接或保存位置已被移走，桌面版会停止启动并提示错误，不会自动创建空书库。上表是未自定义时的默认目录。
 
 此前用 `pnpm desktop` 作为日常应用的人，旧书库仍在 `~/Library/Application Support/Reader/library/`；关闭 Reader 后可将其复制到新目录。
 

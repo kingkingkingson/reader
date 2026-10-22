@@ -13,6 +13,7 @@ import (
 // Codex; Messages is the active, possibly compacted Chat Completions window.
 // The UI transcript and per-turn protocol events remain in messages/agent_runs.
 type documentConversation struct {
+	PiEntries       json.RawMessage         `json:"piEntries,omitempty"`
 	SeenSources     map[string]bool         `json:"seenSources,omitempty"`
 	ID              string                  `json:"id"`
 	ConnectionKey   string                  `json:"connectionKey"`
@@ -60,7 +61,7 @@ func saveDocumentConversation(ctx context.Context, db interface {
 	return err
 }
 func (a *documentAgent) beginConversation(ctx context.Context, in AIInput, key string) ([]toolCompletionMessage, error) {
-	c, err := a.server.Store.documentConversation(ctx, a.corpus.DocumentID, a.provider, key)
+	c, err := a.server.Store.documentConversation(ctx, a.corpus.DocumentID, a.conversationProvider(), key)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +209,7 @@ func (a *documentAgent) commitConversation(ctx context.Context, tx *sql.Tx, mess
 	// Preserve exact provider continuation fields for replay. The separate UI
 	// thinking transcript is saved with the answer and never replayed as content.
 
-	return saveDocumentConversation(ctx, tx, a.corpus.DocumentID, a.provider, c)
+	return saveDocumentConversation(ctx, tx, a.corpus.DocumentID, a.conversationProvider(), c)
 }
 func cleanConversationEvents(messages []toolCompletionMessage) []toolCompletionMessage {
 	out := append([]toolCompletionMessage(nil), messages...)

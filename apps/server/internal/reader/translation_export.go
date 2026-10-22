@@ -118,21 +118,15 @@ func translationExportMarkdown(title string, source translationInput, items []Tr
 				pages[b.Page] = append(pages[b.Page], b)
 			}
 		}
-		parsed, incomplete := map[int]bool{}, map[int]bool{}
+		parsed := map[int]bool{}
 		for _, page := range m.ParsedPages {
 			parsed[page] = true
-		}
-		for _, page := range m.IncompletePages {
-			incomplete[page] = true
 		}
 		for page := 1; page <= m.Pages; page++ {
 			fmt.Fprintf(&out, "## 第 %d 页\n\n", page)
 			if len(parsed) > 0 && !parsed[page] {
 				out.WriteString("> 此页尚未解析，未包含正文。\n\n")
 				continue
-			}
-			if incomplete[page] {
-				out.WriteString("> 此页解析不完整，可能缺少正文。\n\n")
 			}
 			for _, b := range pages[page] {
 				writeBlock(b)

@@ -37,3 +37,22 @@ it("moves before or after a target without mutating or losing hidden positions",
   ]);
   expect(moveColumn(order, "tags", "tags", "before")).toBe(order);
 });
+
+it("restores a hidden title in its saved position and shows it by default for older settings", () => {
+  const prefs = {
+    columns: ["authors", "year"] as ("authors" | "year")[],
+    columnOrder: ["authors", "title", "year"] as (
+      "title" | "authors" | "year"
+    )[],
+  };
+  expect(visibleColumns({ ...prefs, showTitle: false })).toEqual([
+    "authors",
+    "year",
+  ]);
+  expect(visibleColumns(prefs)).toEqual(["authors", "title", "year"]);
+  expect(visibleColumns({ ...prefs, showTitle: true })).toEqual([
+    "authors",
+    "title",
+    "year",
+  ]);
+});

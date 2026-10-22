@@ -22,6 +22,8 @@ declare const READER_BUILD_COMMIT: string;
 
 export function startDiagnosticService(
   getWindow: () => BrowserWindow | undefined,
+  getLibrary: () => string | undefined = () =>
+    join(app.getPath("userData"), "library"),
 ) {
   const directory = join(app.getPath("userData"), "logs");
   const logs = new DiagnosticLogs(directory);
@@ -58,7 +60,7 @@ export function startDiagnosticService(
         const output = join(temporary, "bundle.zip");
         const result = await logs.export(
           output,
-          join(app.getPath("userData"), "library"),
+          getLibrary(),
           {
             mode: "desktop",
             appVersion: version,

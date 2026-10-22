@@ -28,6 +28,16 @@ func (s *chatStreamWriter) send(event string, value any) error {
 	if event == "done" || event == "error" {
 		s.terminal = true
 	}
+	if sink, ok := s.w.(interface{ send(string, any) error }); ok {
+		err := sink.send(event, value)
+		if err == nil && (event == "delta" || event == "draft" || event == "reasoning") && s.firstFlush.IsZero() {
+			s.firstFlush = time.Now()
+		}
+		if err != nil {
+			s.cancel()
+		}
+		return err
+	}
 	b, err := json.Marshal(value)
 	if err == nil {
 		_, err = fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, b)
@@ -45,13 +55,21 @@ func (s *chatStreamWriter) send(event string, value any) error {
 	return err
 }
 func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w http.ResponseWriter, documentID string, config AIConfig, in AIInput) {
+	cache := &s.codexChat
+	documentCache := &s.documentCodex
+	if in.Chat != nil && in.Chat.SessionID != "" {
+		cache = &codexChatCache{}
+		documentCache = &documentCodexCache{}
+		defer cache.close()
+		defer documentCache.close()
+	}
 	if config.Primary != "codex" || len(in.images()) > 0 {
-		s.codexChat.reset()
+		cache.reset()
 	}
 	committed := false
 	defer func() {
 		if !committed {
-			s.codexChat.finish(in.Chat, "", false)
+			cache.finish(in.Chat, "", false)
 		}
 	}()
 	// Bound a blocked network write by the request deadline and interrupt it on
@@ -104,7 +122,7 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		return
 	}
 	contextWarning := ""
-	if in.Chat != nil && len(in.images()) == 0 && (config.Primary == "codex" || config.Primary == "api") {
+	if in.Chat != nil && (len(in.images()) == 0 || (config.Primary == "api" && in.Chat.SessionID != "")) && (config.Primary == "codex" || config.Primary == "api") {
 		d, docErr := s.Store.Document(documentID)
 		if docErr == nil {
 			if _, fileErr := os.Stat(s.Store.File(d)); fileErr == nil {
@@ -124,7 +142,7 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 						return
 					}
 				} else {
-					in.Chat.Agent = &documentAgent{server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool, message string) error {
+					in.Chat.Agent = &documentAgent{sessionID: in.Chat.SessionID, codexCache: documentCache, server: s, corpus: corpus, ctx: ctx, ID: id(), activity: func(phase, tool, message string) error {
 						return out.send("activity", map[string]string{"phase": phase, "tool": tool, "message": message})
 					}}
 				}
@@ -135,6 +153,13 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 		in.Prompt = in.Chat.legacyPrompt() + readingLocationPrompt(in.Chat.ReadingLocation) + contextWarning
 	}
 	service := s.generationService(config)
+	if conn, ok := service.connections["codex"]; ok {
+		if adapter, ok := conn.Adapter.(codexChatAdapter); ok {
+			adapter.cache = cache
+			conn.Adapter = adapter
+			service.connections["codex"] = conn
+		}
+	}
 	if _, err := s.Store.DB.Exec("INSERT OR IGNORE INTO chat_usage_coverage(document_id,history_complete) VALUES(?,1)", documentID); err != nil {
 		finalErr = generationError(ErrorSave, "无法保存聊天统计")
 		_ = out.send("error", map[string]string{"error": finalErr.Error()})
@@ -167,7 +192,7 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 			err = generationError(ErrorCanceled, "文档已不可用")
 		} else if in.Chat != nil && in.Chat.Agent != nil {
 			err = s.saveDocumentAgentAnswer(ctx, in.Chat.Agent, result.Text, result.Provider, result.Reasoning)
-		} else if err = s.Store.saveMessage(Message{DocumentID: documentID, Role: "assistant", Content: result.Text, Reasoning: result.Reasoning}); err != nil {
+		} else if err = s.Store.saveChatAnswer(ctx, in.Chat, result.Text, result.Reasoning); err != nil {
 			err = generationError(ErrorSave, "回答已收到，但无法保存到本地数据库")
 		}
 	}
@@ -185,7 +210,7 @@ func (s *Server) streamChat(ctx context.Context, cancel context.CancelFunc, w ht
 	if finalErr == nil && result.Provider == "codex" {
 		savedID, saveErr := s.Store.lastChatMessageID(documentID)
 		if saveErr == nil {
-			s.codexChat.finish(in.Chat, savedID, true)
+			cache.finish(in.Chat, savedID, true)
 			committed = true
 		}
 	}

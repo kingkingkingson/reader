@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -116,6 +117,59 @@ it("keeps native export usable after failure and rejects events from other frame
     console.error = originalError;
     for (const listener of process.listeners("uncaughtExceptionMonitor"))
       if (!originalListeners.includes(listener))
+        process.removeListener("uncaughtExceptionMonitor", listener);
+    rmSync(mocks.directory, { recursive: true, force: true });
+  }
+});
+
+it("exports only the active library's failure files, including after startup fails", async () => {
+  mocks.directory = mkdtempSync(join(tmpdir(), "reader-active-diagnostics-"));
+  const originalWarn = console.warn,
+    originalError = console.error;
+  const listeners = process.listeners("uncaughtExceptionMonitor");
+  const oldLibrary = join(mocks.directory, "library");
+  let active: string | undefined;
+  const custom = join(mocks.directory, "custom-library");
+  for (const [root, name] of [
+    [oldLibrary, "old-backup.txt"],
+    [custom, "current-library.txt"],
+  ]) {
+    const folder = join(root, "cache", "a".repeat(32), "translation-failures");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, name), "failure diagnostic");
+  }
+  const service = startDiagnosticService(
+    () => undefined,
+    () => active,
+  );
+  try {
+    for (const location of [custom, undefined]) {
+      active = location;
+      const output = join(
+        mocks.directory,
+        location ? "current.zip" : "startup-failed.zip",
+      );
+      mocks.save.mockResolvedValue({ canceled: false, filePath: output });
+      expect(await service.export()).toBe(true);
+      const names = execFileSync(
+        "python3",
+        [
+          "-c",
+          "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print('\\n'.join(z.namelist()))",
+          output,
+        ],
+        { encoding: "utf8" },
+      );
+      expect(names).not.toContain("old-backup.txt");
+      if (location) expect(names).toContain("current-library.txt");
+      else expect(names).not.toContain("current-library.txt");
+      expect(names).toContain("manifest.json");
+    }
+  } finally {
+    console.warn = originalWarn;
+    console.error = originalError;
+    for (const listener of process.listeners("uncaughtExceptionMonitor"))
+      if (!listeners.includes(listener))
         process.removeListener("uncaughtExceptionMonitor", listener);
     rmSync(mocks.directory, { recursive: true, force: true });
   }

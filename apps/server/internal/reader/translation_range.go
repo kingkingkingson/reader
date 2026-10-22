@@ -5,57 +5,54 @@ import (
 	"unicode/utf8"
 )
 
-// Books translate a chapter at a time. One request queues at most this much
-// untranslated source text, in reading order, so a long chapter needs another
-// request instead of an unbounded provider run.
-const bookTranslationCharacters = 40000
-
 // A formula is one image request; charge it like a short paragraph.
 const formulaTranslationCharacters = 500
 
 type translationRange struct {
 	Queued     int `json:"queued"`
 	Characters int `json:"characters"`
-	// NextPage is where a limit stopped the request; 0 when the range is fully requested.
+	// Retained for older clients. A request now queues the whole chapter.
 	NextPage int `json:"nextPage"`
 	// Parsing reports that the chapter's pages are being parsed first; its
 	// translation is queued when parsing finishes.
 	Parsing bool `json:"parsing"`
 }
 
-func translationCost(b PDFBlock) int {
-	if source := translationSource(b); source != "" {
-		return utf8.RuneCountInString(source)
-	}
-	return formulaTranslationCharacters
-}
-
-// queueTranslationRange marks the next untranslated paragraphs of [from, to]
-// pending, within the page and character limits, and queues translation.
+// queueTranslationRange selects a chapter as the input to the shared queue.
 // Callers hold processingMu.
 func (s *Server) queueTranslationRange(d Document, m layoutManifest, from, to int) (translationRange, error) {
+	chapter := m
+	chapter.Blocks = nil
+	for _, b := range m.Blocks {
+		if b.Page >= from && b.Page <= to {
+			chapter.Blocks = append(chapter.Blocks, b)
+		}
+	}
+	return s.queueTranslationInput(d, chapter)
+}
+
+// Queue every unfinished unit in the selected input. PDF and EPUB chapters use
+// the same pending records and translation workers as papers; idle units outside
+// this input remain untouched. Callers hold processingMu.
+func (s *Server) queueTranslationInput(d Document, input translationInput) (translationRange, error) {
 	result := translationRange{}
-	items, err := s.translations(d.ID, m)
+	items, err := s.translations(d.ID, input)
 	if err != nil {
 		return result, err
 	}
-	start, end, ok := chapterWindow(&m, items, from, to)
-	if !ok {
-		return result, nil
+	costs := map[string]int{}
+	for _, paragraph := range input.translationParagraphs() {
+		costs[paragraph.BlockID] = utf8.RuneCountInString(paragraph.Source)
 	}
-	byID := map[string]TranslationBlock{}
+	pending := false
 	for _, t := range items {
-		byID[t.BlockID] = t
-	}
-	for _, b := range m.readingBlocks() {
-		t, ok := byID[b.ID]
-		if !ok || b.Page < start || b.Page > end || (t.Status != "idle" && t.Status != "failed") {
+		pending = pending || t.Status == "pending" || t.Status == "running"
+		if t.Status != "idle" && t.Status != "failed" {
 			continue
 		}
-		cost := translationCost(b)
-		if result.Queued > 0 && result.Characters+cost > bookTranslationCharacters {
-			result.NextPage = b.Page
-			break
+		cost, ok := costs[t.BlockID]
+		if !ok {
+			cost = formulaTranslationCharacters
 		}
 		t.Status, t.Error, t.FormulaMarkdown = "pending", "", ""
 		if err = s.saveTranslation(d.ID, t); err != nil {
@@ -64,10 +61,10 @@ func (s *Server) queueTranslationRange(d Document, m layoutManifest, from, to in
 		result.Queued++
 		result.Characters += cost
 	}
-	if result.NextPage == 0 && end < min(to, m.Pages) {
-		result.NextPage = end + 1
-	}
-	if result.Queued > 0 {
+	if result.Queued > 0 || pending {
+		if err := s.Store.enqueueDocument(d); err != nil {
+			return result, err
+		}
 		p, err := s.Store.processing(d.ID)
 		if err != nil {
 			return result, err

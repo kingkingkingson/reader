@@ -16,8 +16,7 @@ import (
 	"time"
 )
 
-// A book chapter request parses at most this many pages at once, so a long
-// chapter or an outline-less book never runs the layout model over the book.
+// Parse long chapters in bounded worker runs, continuing automatically.
 const bookLayoutPages = 30
 
 type PageRange struct {
@@ -148,7 +147,7 @@ func parsedPage(m *layoutManifest, page int) bool {
 
 // chapterWindow returns the next pages of [from, to] that still need work:
 // it starts at the first unparsed page or the first page with untranslated
-// paragraphs and spans at most bookLayoutPages.
+// paragraphs and extends to the end of the requested chapter.
 func chapterWindow(m *layoutManifest, items []TranslationBlock, from, to int) (start, end int, ok bool) {
 	open := map[int]bool{}
 	if m != nil {
@@ -158,14 +157,14 @@ func chapterWindow(m *layoutManifest, items []TranslationBlock, from, to int) (s
 			status[t.BlockID] = t.Status
 		}
 		for _, b := range m.readingBlocks() {
-			if s := status[b.ID]; s == "idle" || s == "failed" {
+			if s := status[b.ID]; s == "idle" || s == "failed" || s == "pending" || s == "running" {
 				open[b.Page] = true
 			}
 		}
 	}
 	for page := from; page <= to; page++ {
 		if !parsedPage(m, page) || open[page] {
-			return page, min(to, page+bookLayoutPages-1), true
+			return page, to, true
 		}
 	}
 	return 0, 0, false
@@ -196,14 +195,33 @@ func (s *Server) learnBookChapter(ctx context.Context, d Document, p *Processing
 		}
 	}
 	if start, end, ok := chapterWindow(known, items, p.Chapter.From, p.Chapter.To); ok {
-		if missing := unparsedPages(known, start, end); len(missing) > 0 {
+		for missing := unparsedPages(known, start, end); len(missing) > 0; missing = unparsedPages(known, start, end) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			work := filepath.Join(s.Store.Root, "cache", d.ID, "analysis-work")
-			if err := s.runLayout(ctx, d, work, missing[0], missing[len(missing)-1], p); err != nil {
+			last := missing[0]
+			for _, page := range missing[1:] {
+				if page != last+1 || page-missing[0] >= bookLayoutPages {
+					break
+				}
+				last = page
+			}
+			if err := s.runLayout(ctx, d, work, missing[0], last, p); err != nil {
 				return err
 			}
 			if err := s.mergeLayout(d.ID, work); err != nil {
 				return err
 			}
+			m, err := s.readLayout(d.ID)
+			if err != nil {
+				return err
+			}
+			if !parsedPage(&m, missing[0]) {
+				return errors.New("本章解析未返回请求的页面")
+			}
+			known = &m
+			end = min(end, m.Pages)
 		}
 	}
 	m, err := s.readLayout(d.ID)

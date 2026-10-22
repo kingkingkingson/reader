@@ -80,6 +80,25 @@ type layoutManifest struct {
 
 var blockIDPattern = regexp.MustCompile(`^p[1-9][0-9]*-b[1-9][0-9]*$`)
 
+// Older caches treated every page without a text layer as incomplete. Keep
+// wire compatibility while dropping only that obsolete warning, not real errors.
+var legacyNoTextWarning = regexp.MustCompile(`第 [0-9]+ 页无可提取文字；尚未接入 OCR，正文不完整。`)
+
+func withoutNoTextWarning(value string) string {
+	return strings.TrimSpace(legacyNoTextWarning.ReplaceAllString(value, ""))
+}
+
+func normalizeNoTextProcessing(p *Processing) {
+	p.Incomplete = false
+	p.Warning = withoutNoTextWarning(p.Warning)
+	if p.Detail == "部分就绪：有页面缺少可提取文字，尚未接入 OCR" {
+		p.Detail = "正文翻译已就绪"
+	}
+	if p.Translating != nil {
+		p.Translating.Warning = withoutNoTextWarning(p.Translating.Warning)
+	}
+}
+
 func (s *Store) processing(id string) (Processing, error) {
 	var p Processing
 	var body string
@@ -87,6 +106,7 @@ func (s *Store) processing(id string) (Processing, error) {
 	if e == nil {
 		e = json.Unmarshal([]byte(body), &p)
 	}
+	normalizeNoTextProcessing(&p)
 	return p, e
 }
 func (s *Store) saveProcessing(p Processing) error {
@@ -99,6 +119,7 @@ func (s *Store) saveProcessing(p Processing) error {
 		}
 		p = mergeProcessing(current, p)
 	}
+	normalizeNoTextProcessing(&p)
 	p.UpdatedAt = now()
 	b, e := json.Marshal(p)
 	if e != nil {
@@ -115,6 +136,18 @@ func initialProcessing(id string) Processing {
 // interrupted and retried work still continues.
 func (s *Store) enableLegacyProcessing() error {
 	_, err := s.DB.Exec("UPDATE document_processing SET body=json_set(body,'$.enabled',json('true')) WHERE json_type(body,'$.enabled') IS NULL")
+	return err
+}
+
+// Older translation pause controls could also stop initial paper parsing.
+// Resume only that local stage and retain the user's decision not to translate.
+func (s *Store) recoverPausedPaperParsing() error {
+	_, err := s.DB.Exec(`UPDATE document_processing
+ SET status='queued',body=json_set(body,'$.enabled',json('true'),'$.status','queued',
+ '$.detail','等待解析 PDF','$.autoTranslateMaxPages',0,'$.updatedAt',?)
+ WHERE phase='learning' AND status='paused' AND json_extract(body,'$.enabled')=0
+ AND COALESCE(json_extract(body,'$.retranslating'),0)=0
+ AND document_id IN (SELECT id FROM documents WHERE type='pdf' AND library='papers')`, now())
 	return err
 }
 
@@ -187,6 +220,7 @@ func (s *Server) processingList(w http.ResponseWriter, r *http.Request) {
 			fail(w, 500, "解析进度损坏")
 			return
 		}
+		normalizeNoTextProcessing(&p)
 		out = append(out, p)
 	}
 	respond(w, 200, out)
@@ -280,6 +314,14 @@ func readValidatedLayout(path string) (layoutManifest, error) {
 			return m, errors.New("版面位置无效")
 		}
 	}
+	m.IncompletePages = nil
+	warnings := []string{}
+	for _, warning := range m.Warnings {
+		if value := withoutNoTextWarning(warning); value != "" {
+			warnings = append(warnings, value)
+		}
+	}
+	m.Warnings = warnings
 	return m, nil
 }
 
@@ -295,6 +337,9 @@ func (s *Server) StartProcessing(parent context.Context) func() {
 	}
 	if err := s.Store.enableLegacyProcessing(); err != nil {
 		log.Printf("cannot migrate processing state: %v", err)
+	}
+	if err := s.Store.recoverPausedPaperParsing(); err != nil {
+		log.Printf("cannot recover paper parsing: %v", err)
 	}
 	if err := s.Store.prepareManualEPUBProcessing(); err != nil {
 		log.Printf("cannot prepare EPUB processing: %v", err)
@@ -516,10 +561,8 @@ func (s *Server) learnPDF(ctx context.Context, p *Processing) error {
 	}
 	p.PagesDone = m.Pages
 	p.PagesTotal = m.Pages
-	if len(m.Warnings) > 0 {
-		p.Warning = strings.Join(m.Warnings, " ")
-	}
-	p.Incomplete = len(m.IncompletePages) > 0 || strings.Contains(p.Warning, "无可提取文字")
+	p.Warning = strings.Join(m.Warnings, " ")
+	p.Incomplete = false
 	items, e := s.translations(d.ID, m)
 	if e != nil {
 		return e

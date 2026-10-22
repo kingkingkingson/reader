@@ -51,19 +51,42 @@ func (s *codexSession) documentConfig(ctx context.Context) (map[string]codexMCPC
 	s.contextWindow = codexConfiguredWindow(raw)
 	var result struct {
 		Config struct {
-			Servers  map[string]codexMCPConfig `json:"mcp_servers"`
-			Features map[string]bool           `json:"features"`
+			Servers  map[string]codexMCPConfig  `json:"mcp_servers"`
+			Features map[string]json.RawMessage `json:"features"`
 		} `json:"config"`
 	}
 	if json.Unmarshal(raw, &result) != nil || result.Config.Servers == nil {
 		return nil, generationError(ErrorProtocol, "Codex MCP 配置格式不兼容")
 	}
 	for _, name := range []string{"shell_tool", "unified_exec", "plugins", "hooks", "apps", "multi_agent", "code_mode", "view_image", "image_generation"} {
-		if result.Config.Features[name] {
+		enabled, ok := codexFeatureEnabled(result.Config.Features[name])
+		if !ok {
+			return nil, generationError(ErrorProtocol, "Codex 功能配置格式不兼容")
+		}
+		if enabled {
 			return nil, generationError(ErrorCapability, "Codex 无关能力未关闭")
 		}
 	}
 	return result.Config.Servers, nil
+}
+
+// Codex reports a feature as a bool, or as a table such as {"enabled": false}
+// when the user's config.toml declares [features.<name>].
+func codexFeatureEnabled(raw json.RawMessage) (bool, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, true
+	}
+	var flag bool
+	if json.Unmarshal(raw, &flag) == nil {
+		return flag, true
+	}
+	var table struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if json.Unmarshal(raw, &table) != nil || table.Enabled == nil {
+		return false, false
+	}
+	return *table.Enabled, true
 }
 func (s *codexSession) verifyDocumentConfig(ctx context.Context) (map[string]codexMCPConfig, error) {
 	servers, e := s.documentConfig(ctx)
@@ -188,12 +211,16 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 	if err != nil {
 		return GenerateResult{}, err
 	}
-	entry, err := a.server.documentCodex.acquire(ctx, a, root, model)
+	cache := a.codexCache
+	if cache == nil {
+		cache = &a.server.documentCodex
+	}
+	entry, err := cache.acquire(ctx, a, root, model)
 	if err != nil {
 		return GenerateResult{}, err
 	}
 	healthy := false
-	defer func() { a.server.documentCodex.release(entry, healthy) }()
+	defer func() { cache.release(entry, healthy) }()
 	session := entry.session
 	if session.threadID != "" {
 		if _, err = session.verifyDocumentConfig(ctx); err != nil {
@@ -221,7 +248,7 @@ func streamCodexDocumentChat(ctx context.Context, root, model string, in AIInput
 		progress.NativePending = a.conversation.NativePending
 		progress.NativeDirty = a.conversation.NativeDirty
 		progress.NativeUsage = a.conversation.NativeUsage
-		return saveDocumentConversation(ctx, a.server.Store.DB, a.corpus.DocumentID, a.provider, progress)
+		return saveDocumentConversation(ctx, a.server.Store.DB, a.corpus.DocumentID, a.conversationProvider(), progress)
 	}
 	a.conversation.NativeDirty = true
 	a.conversation.NativePending = ""

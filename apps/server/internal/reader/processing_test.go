@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -161,7 +162,7 @@ func TestLibraryLockIsExclusive(t *testing.T) {
 	}
 	next()
 }
-func TestScannedPagesRemainExplicitlyIncomplete(t *testing.T) {
+func TestPagesWithoutTextCompleteWithoutOCRWarnings(t *testing.T) {
 	s, p := processingFixture(t)
 	m := layoutManifest{Pages: 2, Blocks: []PDFBlock{}, Warnings: []string{"第 1 页无可提取文字；尚未接入 OCR，正文不完整。"}, IncompletePages: []int{1}}
 	data, _ := json.Marshal(m)
@@ -169,7 +170,36 @@ func TestScannedPagesRemainExplicitlyIncomplete(t *testing.T) {
 	if e := s.learnPDF(context.Background(), &p); e != nil {
 		t.Fatal(e)
 	}
-	if !p.Incomplete || p.Detail == "正文已就绪，无图片附件需要解析" {
-		t.Fatalf("claimed complete text: %+v", p)
+	if p.Incomplete || p.Status != "complete" || p.Warning != "" || strings.Contains(p.Detail, "OCR") {
+		t.Fatalf("empty page reported as incomplete: %+v", p)
+	}
+}
+
+func TestLegacyNoTextStateIsNormalizedWithoutRestartingWork(t *testing.T) {
+	s, p := processingFixture(t)
+	s.Token = "test-secret"
+	for _, state := range []string{"complete", "paused", "failed"} {
+		p.Status = state
+		p.Enabled = state != "paused"
+		p.Incomplete = true
+		p.Detail = "部分就绪：有页面缺少可提取文字，尚未接入 OCR"
+		if state != "complete" {
+			p.Detail = "保留任务状态"
+		}
+		p.Warning = "第 1 页无可提取文字；尚未接入 OCR，正文不完整。 第 2 页有未归入版面块的文字，已保留。"
+		if _, err := s.Store.DB.Exec("UPDATE document_processing SET status=?,body=? WHERE document_id='doc'", state, jsonText(p)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Store.processing("doc")
+		if err != nil || got.Incomplete || got.Status != state || got.Enabled != p.Enabled || strings.Contains(got.Warning, "OCR") || !strings.Contains(got.Warning, "已保留") {
+			t.Fatalf("legacy state: %+v %v", got, err)
+		}
+		if state != "complete" && got.Detail != p.Detail {
+			t.Fatal("changed failure or pause detail")
+		}
+		response := request(t, s, "GET", "/api/processing", nil)
+		if response.Code != 200 || strings.Contains(response.Body.String(), "OCR") || strings.Contains(response.Body.String(), `"incomplete":true`) {
+			t.Fatal(response.Code, response.Body.String())
+		}
 	}
 }

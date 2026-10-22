@@ -48,6 +48,15 @@ export function translatedAnnotationRanges(
         host.querySelectorAll<HTMLElement>("[data-translation-block]"),
       ).find((n) => n.dataset.translationBlock === part.blockId);
       if (!node) continue;
+      if (part.recovered) {
+        const range = recoveredAnnotationRange(
+          node,
+          part.sentenceIndexes,
+          part.wholeSentence ? "" : part.matchedQuote || "",
+        );
+        if (range) result.push({ annotation, range });
+        continue;
+      }
       const range = textRange(node, part.start, part.end);
       if (range?.toString().trim() === part.quote.trim())
         result.push({ annotation, range });
@@ -90,4 +99,57 @@ export function paintTranslatedAnnotations(
     api.delete("reader-translation-marks");
     api.delete("reader-translation-underlines");
   };
+}
+
+// Recovery has already selected and persisted the sentence window on the
+// server. Drawing only resolves that window in the current formatted DOM.
+function recoveredAnnotationRange(
+  root: HTMLElement,
+  indexes: number[],
+  quote: string,
+): Range | undefined {
+  const sentences = indexes.map((i) =>
+    root.querySelector<HTMLElement>(`[data-sentence="${i}"]`),
+  );
+  if (!sentences.length || sentences.some((node) => !node)) return;
+  const range = document.createRange();
+  range.setStart(sentences[0]!, 0);
+  const last = sentences.at(-1)!;
+  range.setEnd(last, last.childNodes.length);
+  const before = document.createRange();
+  before.selectNodeContents(root);
+  before.setEnd(range.startContainer, range.startOffset);
+  const base = before.toString().length;
+  const text = range.toString();
+  const whole = () => textRange(root, base, base + text.length);
+  if (!quote) return whole();
+  let start = text.indexOf(quote);
+  if (start >= 0)
+    return textRange(root, base + start, base + start + quote.length);
+  const normalize = (value: string) => {
+    let text = "";
+    const offsets: number[] = [];
+    for (let i = 0; i < value.length; i++) {
+      if (/\s/u.test(value[i])) continue;
+      const code = value.charCodeAt(i);
+      text +=
+        code >= 0xff01 && code <= 0xff5e
+          ? String.fromCharCode(code - 0xfee0)
+          : value[i];
+      offsets.push(i);
+    }
+    return { text, offsets };
+  };
+  const normalized = normalize(text),
+    needle = normalize(quote).text;
+  start = needle ? normalized.text.indexOf(needle) : -1;
+  if (start >= 0)
+    return textRange(
+      root,
+      base + normalized.offsets[start],
+      base + normalized.offsets[start + needle.length - 1] + 1,
+    );
+  // Markdown/KaTeX can change the visible character stream. The persisted
+  // source-aligned sentence remains the safe fallback for a missing phrase.
+  return whole();
 }

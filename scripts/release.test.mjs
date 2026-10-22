@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 const scripts = dirname(fileURLToPath(import.meta.url));
 const temporary = [];
 afterEach(async () => {
@@ -147,3 +147,61 @@ test("complete artifacts get correct hashes and upload requires the matching tag
   expect(upload.status).not.toBe(0);
   expect(upload.stderr).toContain("Release tag must match app version");
 });
+
+// Intercept only the external gh process; execute the real release script,
+// including its file validation, hashing, upload ordering and exit status.
+test.each([0, 1, 2])(
+  "publishes checksums last and stops on upload failure %s",
+  async (failAt) => {
+    const cwd = await fixture();
+    await installers(cwd);
+    const hook = join(cwd, "gh-hook.mjs");
+    await writeFile(
+      hook,
+      `
+    import cp from "node:child_process";
+    import { syncBuiltinESMExports } from "node:module";
+    import { appendFileSync } from "node:fs";
+    let count = 0;
+    cp.spawnSync = (command, args) => {
+      if (command !== "gh") throw new Error("Unexpected subprocess");
+      appendFileSync("uploads.jsonl", JSON.stringify(args) + "\\n");
+      return { status: ++count === ${failAt} ? 1 : 0 };
+    };
+    syncBuiltinESMExports();
+  `,
+    );
+    const result = run(
+      "release-assets.mjs",
+      cwd,
+      {
+        RELEASE_TAG: "v0.2.0",
+        NODE_OPTIONS: `--import=${pathToFileURL(hook).href}`,
+      },
+      ["--upload"],
+    );
+    expect(result.status, result.stderr).toBe(failAt ? 1 : 0);
+    const uploads = (await readFile(join(cwd, "uploads.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(uploads[0]).toEqual([
+      "release",
+      "upload",
+      "v0.2.0",
+      "release/Reader-0.2.0-mac-arm64.dmg",
+      "release/Reader-0.2.0-mac-arm64.zip",
+      "release/Reader-0.2.0-win-x64.exe",
+      "--clobber",
+    ]);
+    expect(uploads).toHaveLength(failAt === 1 ? 1 : 2);
+    if (failAt !== 1)
+      expect(uploads[1]).toEqual([
+        "release",
+        "upload",
+        "v0.2.0",
+        "release/SHA256SUMS.txt",
+        "--clobber",
+      ]);
+  },
+);

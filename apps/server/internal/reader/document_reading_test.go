@@ -43,7 +43,7 @@ func runDocumentReadingProcess() {
 			if url != "" {
 				servers["reader_document"] = map[string]any{"enabled": true, "url": url}
 			}
-			reply(map[string]any{"config": map[string]any{"mcp_servers": servers, "features": map[string]bool{}, "model_context_window": 65536}})
+			reply(map[string]any{"config": map[string]any{"mcp_servers": servers, "features": map[string]any{"code_mode": map[string]bool{"enabled": false}, "network_proxy": nil}, "model_context_window": 65536}})
 		case "thread/start":
 			reply(map[string]any{"thread": map[string]string{"id": "thread"}, "model": "test"})
 		case "mcpServerStatus/list":
