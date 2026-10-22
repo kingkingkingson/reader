@@ -64,6 +64,8 @@ type PDFBlock struct {
 	Text    string `json:"text"`
 	Image   string `json:"image,omitempty"`
 	Caption string `json:"caption,omitempty"`
+	// Fragments keeps each page's bounds when one paragraph crosses a page boundary.
+	Fragments []PDFFragment `json:"fragments,omitempty"`
 }
 type layoutManifest struct {
 	// PDF document information (Title, Author, …) as read by PDF.js.
@@ -246,7 +248,7 @@ func (s *Server) documentBlocks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	blocks := []PDFBlock{}
-	for _, b := range manifest.Blocks {
+	for _, b := range manifest.readingBlocks() {
 		if b.Image != "" || strings.TrimSpace(b.Text) != "" {
 			blocks = append(blocks, b)
 		}

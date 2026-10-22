@@ -1,4 +1,4 @@
-import type { PDFBlock } from "./index";
+import type { PDFBlock, PDFBlockFragment } from "./index";
 
 // Keep this classification in sync with the server translation filter.
 export function isPDFPageDecoration(
@@ -21,4 +21,17 @@ export function isPDFPageDecoration(
       block.text.trim(),
     )
   );
+}
+
+/** Regions used to hit-test and highlight a block, including a cross-page continuation. */
+export function blockRegions(block: PDFBlock): PDFBlockFragment[] {
+  if (block.fragments?.length) return block.fragments;
+  return [
+    {
+      id: block.id,
+      page: block.page,
+      bounds: block.bounds,
+      text: block.text,
+    },
+  ];
 }

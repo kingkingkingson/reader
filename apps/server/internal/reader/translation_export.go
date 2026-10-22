@@ -113,7 +113,7 @@ func translationExportMarkdown(title string, source translationInput, items []Tr
 	switch m := source.(type) {
 	case layoutManifest:
 		pages := map[int][]PDFBlock{}
-		for _, b := range m.Blocks {
+		for _, b := range m.readingBlocks() {
 			if !isPDFPageDecoration(b) {
 				pages[b.Page] = append(pages[b.Page], b)
 			}

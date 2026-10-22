@@ -4128,6 +4128,18 @@ export interface components {
             kind?: "selection" | "section";
             image?: string;
             caption?: string;
+            /** @description Page regions of one paragraph that continues across a page boundary. The block text is the joined paragraph. */
+            fragments?: {
+                id: string;
+                page: number;
+                bounds: {
+                    x: number;
+                    y: number;
+                    width: number;
+                    height: number;
+                };
+                text: string;
+            }[];
         };
         AICapability: {
             text: boolean;

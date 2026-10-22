@@ -550,6 +550,12 @@ export interface Processing {
   warning?: string;
   updatedAt: string;
 }
+export interface PDFBlockFragment {
+  id: string;
+  page: number;
+  bounds: { x: number; y: number; width: number; height: number };
+  text: string;
+}
 export interface PDFBlock {
   id: string;
   page: number;
@@ -558,6 +564,8 @@ export interface PDFBlock {
   text: string;
   image?: string;
   caption?: string;
+  /** Page regions of one paragraph that continues across a page boundary. */
+  fragments?: PDFBlockFragment[];
 }
 export interface EPUBReadingBlock {
   image?: string;
@@ -652,7 +660,7 @@ export interface AgentModel {
 /** "vision" is the API agent's image-input model. */
 export type ModelTask = "chat" | "translation" | "vision";
 
-export { isPDFPageDecoration } from "./pdf-content";
+export { blockRegions, isPDFPageDecoration } from "./pdf-content";
 
 export { pdfFontAscent } from "./pdf-text";
 

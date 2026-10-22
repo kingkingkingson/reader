@@ -2,9 +2,11 @@ import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { BlockActions } from "../BlockActions";
 import {
+  blockRegions,
   isPDFPageDecoration,
   type PDFBlock,
   type PDFBlockAction,
+  type PDFBlockFragment,
   type PDFLocation,
 } from "@reader/core";
 // Includes the toolbar's padding, which bridges the gap above the block.
@@ -15,21 +17,26 @@ export function hitBlock(
   x: number,
   y: number,
 ) {
-  return blocks
-    .filter(
-      (b) =>
-        b.page === page &&
-        !isPDFPageDecoration(b) &&
-        (b.image || b.text.trim()) &&
-        x >= b.bounds.x &&
-        y >= b.bounds.y &&
-        x <= b.bounds.x + b.bounds.width &&
-        y <= b.bounds.y + b.bounds.height,
-    )
-    .sort(
-      (a, b) =>
-        a.bounds.width * a.bounds.height - b.bounds.width * b.bounds.height,
-    )[0];
+  const hits = blocks.flatMap((block) => {
+    if (isPDFPageDecoration(block) || !(block.image || block.text.trim()))
+      return [];
+    return blockRegions(block)
+      .filter(
+        (part) =>
+          part.page === page &&
+          x >= part.bounds.x &&
+          y >= part.bounds.y &&
+          x <= part.bounds.x + part.bounds.width &&
+          y <= part.bounds.y + part.bounds.height,
+      )
+      .map((part) => ({ block, part }));
+  });
+  hits.sort(
+    (a, b) =>
+      a.part.bounds.width * a.part.bounds.height -
+      b.part.bounds.width * b.part.bounds.height,
+  );
+  return hits[0]?.block;
 }
 export function referenceBlock(
   blocks: PDFBlock[],
@@ -54,9 +61,12 @@ export function referenceBlock(
     const needle = excerpt.slice(0, 48);
     const match = blocks.find(
       (block) =>
-        block.page === location.page &&
         !isPDFPageDecoration(block) &&
-        block.text.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle),
+        blockRegions(block).some(
+          (part) =>
+            part.page === location.page &&
+            part.text.replace(/\s+/g, " ").toLocaleLowerCase().includes(needle),
+        ),
     );
     if (match) return match;
   }
@@ -79,6 +89,7 @@ export class PDFBlockOverlay {
   private referenceFlashTimer?: ReturnType<typeof setTimeout>;
   private linked = document.createElement("div");
   private searchBlocks = new Map<string, HTMLDivElement>();
+  private regionExtras = new Map<HTMLElement, HTMLElement[]>();
   private pressed?: { id: string; x: number; y: number };
   private textFocusTimer?: ReturnType<typeof setTimeout>;
   constructor(
@@ -123,6 +134,7 @@ export class PDFBlockOverlay {
     const wanted = new Set(blockIds);
     for (const [id, element] of this.searchBlocks) {
       if (!wanted.has(id)) {
+        this.clearRegionExtras(element);
         element.remove();
         this.searchBlocks.delete(id);
       }
@@ -288,7 +300,10 @@ export class PDFBlockOverlay {
         createElement(BlockActions, { block, onAction: this.onAction }),
       );
     }
-    const b = block.bounds;
+    const b =
+      blockRegions(block).find(
+        (part) => part.page === Number(page.dataset.pageNumber),
+      )?.bounds ?? block.bounds;
     Object.assign(this.overlay.style, {
       left: `${b.x * 100}%`,
       top: `${b.y * 100}%`,
@@ -312,6 +327,7 @@ export class PDFBlockOverlay {
   setFocusBlock(blockId: string | null) {
     this.focusId = blockId;
     if (!blockId) {
+      this.clearRegionExtras(this.focus);
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
         this.focus.remove();
       else this.focus.dataset.fading = "";
@@ -326,99 +342,110 @@ export class PDFBlockOverlay {
     this.paintReferenceFlash();
     this.referenceFlashTimer = setTimeout(() => {
       this.referenceFlashId = null;
+      this.clearRegionExtras(this.referenceFlash);
       this.referenceFlash.remove();
       this.referenceFlashTimer = undefined;
     }, 1000);
   }
   private paintReferenceFlash() {
     const block = this.blocks.find((b) => b.id === this.referenceFlashId);
-    const page =
-      block &&
-      this.host.querySelector<HTMLElement>(
-        `.page[data-page-number="${block.page}"]`,
-      );
-    if (!block || !page) {
+    if (!block || !this.paintBlockRegions(this.referenceFlash, block))
       this.referenceFlash.remove();
-      return;
-    }
-    const b = block.bounds;
-    Object.assign(this.referenceFlash.style, {
-      left: `${b.x * 100}%`,
-      top: `${b.y * 100}%`,
-      width: `${b.width * 100}%`,
-      height: `${b.height * 100}%`,
-    });
-    this.referenceFlash.dataset.blockId = block.id;
-    if (this.referenceFlash.parentElement !== page)
-      page.append(this.referenceFlash);
   }
   private paintReadingFocus() {
     if (!this.focusId) return;
     this.focus.remove();
-    if (this.focusId === this.hovered || this.focusId === this.linkedId) return;
+    if (this.focusId === this.hovered || this.focusId === this.linkedId) {
+      this.clearRegionExtras(this.focus);
+      return;
+    }
     const block = this.blocks.find((b) => b.id === this.focusId);
     if (!block) return;
-    const page = this.host.querySelector<HTMLElement>(
-      `.page[data-page-number="${block.page}"]`,
-    );
-    if (!page) return;
-    const b = block.bounds;
-    Object.assign(this.focus.style, {
-      left: `${b.x * 100}%`,
-      top: `${b.y * 100}%`,
-      width: `${b.width * 100}%`,
-      height: `${b.height * 100}%`,
-    });
-    this.focus.dataset.blockId = block.id;
-    this.focus.dataset.blockKind = block.image ? "image" : "text";
-    page.append(this.focus);
+    this.paintBlockRegions(this.focus, block);
   }
   repaint() {
     this.paintReferenceFlash();
     for (const [id, element] of this.searchBlocks) {
       const match = this.blocks.find((block) => block.id === id);
-      const page =
-        match &&
-        this.host.querySelector<HTMLElement>(
-          `.page[data-page-number="${match.page}"]`,
-        );
-      if (!match || !page) {
+      if (!match || !this.paintBlockRegions(element, match)) {
+        this.clearRegionExtras(element);
         element.remove();
-        continue;
       }
-      const b = match.bounds;
-      Object.assign(element.style, {
-        left: `${b.x * 100}%`,
-        top: `${b.y * 100}%`,
-        width: `${b.width * 100}%`,
-        height: `${b.height * 100}%`,
-      });
-      if (element.parentElement !== page) page.append(element);
     }
     this.paintReadingFocus();
     const block = this.blocks.find((b) => b.id === this.linkedId);
-    if (!block) {
+    if (!block || !this.paintBlockRegions(this.linked, block)) {
       this.hide(this.linked);
+      this.clearRegionExtras(this.linked);
       return;
     }
-    const page = this.host.querySelector<HTMLElement>(
-      `.page[data-page-number="${block.page}"]`,
+    if (this.linked.parentElement)
+      this.show(this.linked, this.linked.parentElement);
+  }
+  private pageElement(page: number) {
+    return this.host.querySelector<HTMLElement>(
+      `.page[data-page-number="${page}"]`,
     );
-    if (!page) return;
-    const b = block.bounds;
-    Object.assign(this.linked.style, {
-      left: `${b.x * 100}%`,
-      top: `${b.y * 100}%`,
-      width: `${b.width * 100}%`,
-      height: `${b.height * 100}%`,
+  }
+  private placeBox(
+    element: HTMLElement,
+    page: HTMLElement,
+    bounds: PDFBlockFragment["bounds"],
+  ) {
+    Object.assign(element.style, {
+      left: `${bounds.x * 100}%`,
+      top: `${bounds.y * 100}%`,
+      width: `${bounds.width * 100}%`,
+      height: `${bounds.height * 100}%`,
     });
-    this.linked.dataset.blockId = block.id;
-    this.linked.dataset.blockKind = block.image ? "image" : "text";
-    this.show(this.linked, page);
+    if (element.parentElement !== page) page.append(element);
+  }
+  private clearRegionExtras(primary: HTMLElement) {
+    for (const extra of this.regionExtras.get(primary) ?? []) extra.remove();
+    this.regionExtras.delete(primary);
+  }
+  private paintBlockRegions(primary: HTMLElement, block: PDFBlock) {
+    const regions = blockRegions(block);
+    const page = this.pageElement(regions[0].page);
+    if (!page) {
+      this.clearRegionExtras(primary);
+      return false;
+    }
+    this.placeBox(primary, page, regions[0].bounds);
+    primary.dataset.blockId = block.id;
+    primary.dataset.blockKind = block.image ? "image" : "text";
+    const extras = this.regionExtras.get(primary) ?? [];
+    while (extras.length > regions.length - 1) extras.pop()?.remove();
+    for (let i = 1; i < regions.length; i++) {
+      const region = regions[i];
+      const target = this.pageElement(region.page);
+      let extra = extras[i - 1];
+      if (!target) {
+        extra?.remove();
+        continue;
+      }
+      if (!extra) {
+        extra = document.createElement("div");
+        extra.className = primary.className;
+        extra.setAttribute("aria-hidden", "true");
+        extras[i - 1] = extra;
+      }
+      extra.dataset.blockId = block.id;
+      extra.dataset.blockKind = primary.dataset.blockKind ?? "";
+      this.placeBox(extra, target, region.bounds);
+    }
+    this.regionExtras.set(
+      primary,
+      extras.filter((extra) => extra?.isConnected),
+    );
+    return true;
   }
   destroy() {
     this.cancelTextFocus();
     clearTimeout(this.referenceFlashTimer);
+    for (const extras of this.regionExtras.values())
+      for (const extra of extras) extra.remove();
+    this.regionExtras.clear();
     this.referenceFlash.remove();
     for (const element of this.searchBlocks.values()) element.remove();
     this.searchBlocks.clear();

@@ -16,6 +16,31 @@ it("hits normalized regions only on their source page", () => {
   expect(hitBlock([block], 1, 0.2, 0.3)).toBeUndefined();
   expect(hitBlock([block], 2, 0.8, 0.3)).toBeUndefined();
 });
+it("hits the next page of a paragraph that continues across the boundary", () => {
+  const paragraph: PDFBlock = {
+    id: "p1-b1",
+    page: 1,
+    label: "text",
+    text: "The sentence continues on the next page.",
+    bounds: { x: 0.1, y: 0.8, width: 0.8, height: 0.12 },
+    fragments: [
+      {
+        id: "p1-b1",
+        page: 1,
+        text: "The sentence continues",
+        bounds: { x: 0.1, y: 0.8, width: 0.8, height: 0.12 },
+      },
+      {
+        id: "p2-b1",
+        page: 2,
+        text: "on the next page.",
+        bounds: { x: 0.1, y: 0.08, width: 0.8, height: 0.1 },
+      },
+    ],
+  };
+  expect(hitBlock([paragraph], 2, 0.2, 0.1)?.id).toBe("p1-b1");
+  expect(hitBlock([paragraph], 1, 0.2, 0.85)?.id).toBe("p1-b1");
+});
 it("locates a referenced block by saved selection or source text", () => {
   const textBlock = { ...block, image: undefined, text: "A cited result." };
   expect(

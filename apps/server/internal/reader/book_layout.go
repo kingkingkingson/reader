@@ -157,7 +157,7 @@ func chapterWindow(m *layoutManifest, items []TranslationBlock, from, to int) (s
 		for _, t := range items {
 			status[t.BlockID] = t.Status
 		}
-		for _, b := range m.Blocks {
+		for _, b := range m.readingBlocks() {
 			if s := status[b.ID]; s == "idle" || s == "failed" {
 				open[b.Page] = true
 			}

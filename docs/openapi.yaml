@@ -5417,6 +5417,34 @@
                   "kind": { "enum": ["selection", "section"] },
                   "image": { "type": "string" },
                   "caption": { "type": "string" },
+                  "fragments":
+                    {
+                      "type": "array",
+                      "description": "Page regions of one paragraph that continues across a page boundary. The block text is the joined paragraph.",
+                      "items":
+                        {
+                          "type": "object",
+                          "properties":
+                            {
+                              "id": { "type": "string" },
+                              "page": { "type": "integer" },
+                              "bounds":
+                                {
+                                  "type": "object",
+                                  "properties":
+                                    {
+                                      "x": { "type": "number" },
+                                      "y": { "type": "number" },
+                                      "width": { "type": "number" },
+                                      "height": { "type": "number" },
+                                    },
+                                  "required": ["x", "y", "width", "height"],
+                                },
+                              "text": { "type": "string" },
+                            },
+                          "required": ["id", "page", "bounds", "text"],
+                        },
+                    },
                 },
               "required": ["id", "page", "label", "bounds", "text"],
             },

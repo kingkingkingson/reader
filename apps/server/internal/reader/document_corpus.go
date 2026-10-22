@@ -445,12 +445,19 @@ func (s *Server) pdfCorpus(ctx context.Context, d Document, c *documentCorpus) e
 		start := len(c.Passages)
 		// Already parsed pages use existing blocks and their exact geometry.
 		if layoutErr == nil && parsedPage(&layout, number) {
-			for _, b := range layout.Blocks {
+			for _, b := range layout.readingBlocks() {
 				if b.Page == number && !isPDFPageDecoration(b) && strings.TrimSpace(b.Text) != "" {
 					if b.Image != "" {
 						complexText = true
 					}
-					addCorpusPassage(c, section, label, b.Text, map[string]any{"type": "pdf", "page": number, "rects": []any{b.Bounds}}, "block")
+					rects := []any{b.Bounds}
+					if len(b.Fragments) > 1 {
+						rects = make([]any, len(b.Fragments))
+						for i, fragment := range b.Fragments {
+							rects[i] = fragment.Bounds
+						}
+					}
+					addCorpusPassage(c, section, label, b.Text, map[string]any{"type": "pdf", "page": number, "rects": rects}, "block")
 				}
 			}
 		}

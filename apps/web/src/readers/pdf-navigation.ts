@@ -2,7 +2,11 @@ import { animatePDFScroll } from "./pdf-scroll";
 import { sentenceTextRanges } from "./pdf-sentence-matching";
 import * as pdfjs from "pdfjs-dist";
 import type { PDFViewer } from "pdfjs-dist/web/pdf_viewer.mjs";
-import { isPDFPageDecoration, sentenceAnchor } from "@reader/core";
+import {
+  blockRegions,
+  isPDFPageDecoration,
+  sentenceAnchor,
+} from "@reader/core";
 import type {
   PDFBlock,
   PDFReadingAnchor,
@@ -344,16 +348,19 @@ export class PDFReadingNavigation {
     for (const passage of this.focus) {
       const block = this.blocks().find((b) => b.id === passage.blockId);
       if (!block || !passage.sources.length) continue;
-      const node = this.pageNode(block.page);
-      if (!node) continue;
-      this.linkedRanges.push(
-        ...this.domSentenceRanges(
-          node,
-          block,
-          passage.sources,
-          passage.sourceOffset,
-        ),
-      );
+      const regions = blockRegions(block);
+      for (const region of regions) {
+        const node = this.pageNode(region.page);
+        if (!node) continue;
+        this.linkedRanges.push(
+          ...this.domSentenceRanges(
+            node,
+            { ...block, bounds: region.bounds, text: region.text },
+            passage.sources,
+            regions.length === 1 ? passage.sourceOffset : 0,
+          ),
+        );
+      }
     }
     if (!this.linkedRanges.length) return;
     const highlight =
@@ -369,16 +376,23 @@ export class PDFReadingNavigation {
       result: PDFSentenceLink[] = [];
     for (const block of this.blocks()) {
       if (isPDFPageDecoration(block)) continue;
-      if (
-        block.page !== location.page ||
-        !selection.some((r) => overlap(r, block.bounds) > 0)
-      )
-        continue;
+      const region = blockRegions(block).find(
+        (part) =>
+          part.page === location.page &&
+          selection.some((r) => overlap(r, part.bounds) > 0),
+      );
+      if (!region) continue;
       const translation = translations.find(
         (t) => t.blockId === block.id && t.status === "complete",
       );
       if (!translation) continue;
-      const node = this.pageNode(block.page);
+      const located = {
+        ...block,
+        bounds: region.bounds,
+        text: region.text,
+      };
+      const node = this.pageNode(region.page);
+      const regions = blockRegions(block);
       let prefix = "",
         reliable = !!node;
       const indexes: number[] = [];
@@ -386,13 +400,16 @@ export class PDFReadingNavigation {
         const boxes = node
           ? this.domSentenceBoxes(
               node,
-              block,
+              located,
               [sentenceAnchor(sentence)],
-              prefix.replace(/[\s\u00ad]/g, "").length,
+              regions.length === 1
+                ? prefix.replace(/[\s\u00ad]/g, "").length
+                : 0,
             )
           : [];
         prefix += sentenceAnchor(sentence);
         if (!boxes.length) {
+          if (regions.length > 1) continue;
           reliable = false;
           break;
         }

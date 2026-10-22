@@ -47,7 +47,7 @@ func (s *Server) queueTranslationRange(d Document, m layoutManifest, from, to in
 	for _, t := range items {
 		byID[t.BlockID] = t
 	}
-	for _, b := range m.Blocks {
+	for _, b := range m.readingBlocks() {
 		t, ok := byID[b.ID]
 		if !ok || b.Page < start || b.Page > end || (t.Status != "idle" && t.Status != "failed") {
 			continue

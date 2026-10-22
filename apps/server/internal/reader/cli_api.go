@@ -47,7 +47,7 @@ func (s *Server) readDocumentText(d Document, translations bool) (documentText, 
 		out.Parsed = true
 		out.Units = m.Pages
 		out.ParsedPages = m.ParsedPages
-		for _, b := range m.Blocks {
+		for _, b := range m.readingBlocks() {
 			if isPDFPageDecoration(b) {
 				continue
 			}

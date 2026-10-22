@@ -12,7 +12,7 @@ type translationInput interface {
 
 func (m layoutManifest) translationParagraphs() []translationParagraph {
 	out := []translationParagraph{}
-	for _, b := range m.Blocks {
+	for _, b := range m.readingBlocks() {
 		if source := translationSource(b); source != "" {
 			out = append(out, translationParagraph{b.ID, translationHash(source), source})
 		}
@@ -21,7 +21,7 @@ func (m layoutManifest) translationParagraphs() []translationParagraph {
 }
 func (m layoutManifest) translationItems() []TranslationBlock {
 	out := []TranslationBlock{}
-	for _, b := range m.Blocks {
+	for _, b := range m.readingBlocks() {
 		if needsTranslation(b) {
 			out = append(out, newTranslation(b))
 		}
